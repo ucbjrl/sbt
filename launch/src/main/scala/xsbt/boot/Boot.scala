@@ -18,7 +18,7 @@ object Boot
 				System.setProperty("jline.shutdownhook", "false")
 				CheckProxy()
 				initJansi()
-				run(args)
+				try run(args) finally stopJansi()
 		}
 	}
 	// this arrangement is because Scala does not always properly optimize away
@@ -48,10 +48,13 @@ object Boot
 	private def exit(code: Int): Nothing =
 		System.exit(code).asInstanceOf[Nothing]
 
-	private def initJansi() {
+	private[this] def stopJansi(): Unit = callJAnsi("systemUninstall")
+	private[this] def initJansi(): Unit = callJAnsi("systemInstall")
+	private[this] def callJAnsi(methodName: String): Unit = if(Pre.isWindows && !Pre.isCygwin) callJAnsiMethod(methodName)
+	private[this] def callJAnsiMethod(methodName: String): Unit =
 		try {
 			val c = Class.forName("org.fusesource.jansi.AnsiConsole")
-			c.getMethod("systemInstall").invoke(null)
+			c.getMethod(methodName).invoke(null)
 		} catch {
 			case ignore: ClassNotFoundException =>
 				/* The below code intentionally traps everything. It technically shouldn't trap the
@@ -61,5 +64,4 @@ object Boot
 				*/
 			case ex: Throwable => println("Jansi found on class path but initialization failed: " + ex)
 		}
-	}
 }
