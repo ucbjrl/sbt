@@ -15,13 +15,15 @@ Let's start with the possibly breaking (semantic) changes.
 
 Breaking semantic changes
 =========================
-Sbt has fragmented its core into several plugins which now provide the default settings.  Your build could be broken if you
+Sbt has fragmented its core into several plugins which now provide the default settings.  Your build *may* be broken if you
 have the following constructs:
 
 
 Using ``Project(..., settings=???)`` to remove default settings
 ---------------------------------------------------------------
-If your project is removing default settings through the ``settings`` argument, then your build will most likely be broken.
+If your project is removing default settings through the ``settings`` argument, then your build will now also include the
+autoPlugin settings *before* your settings.   This means things like ``compile``, ``test`` will still be on your build.
+
 For example a ``project/build.scala`` file like so ::
 
     import sbt._
@@ -39,7 +41,7 @@ For example a ``project/build.scala`` file like so ::
       ...
     }
 
-Will no longer function as desired.   You'll need to explicitly disable the core sbt plugins.  You can
+Will contain the additional settings.   You'll need to explicitly disable the core sbt plugins.  You can
 do this by excluding the ``GlobalModule`` plugin which, in term, will prevent any other default plugin
 from being loaded.   The new ``project/build.sbt`` ::
 
@@ -99,6 +101,8 @@ To fix you need to add both the ``autoPlugins`` and ``projectSettings`` includes
 
 The two new ``AddSettings`` members, ``autoPlugins`` and ``projectSettings`` are required, in the order shown.  For
 more information please read :doc:`Setting Initialization <../Architecture/Setting-Initialization>`.
+
+*Note: ``AddSettings`` is still considered an advanced feature added in sbt 0.13.1.  The semantics should not change further in the 0.13.x series, but this is not guaranteed.*
 
 
 
