@@ -334,7 +334,7 @@ the sbinary library, which allows you to specify a binary serialization for clas
     val myTask = taskKey[MyTaskResult]("a useless example task.")
 
     myTask := {
-      implciit object MyFormat extends Format[MyTaskResult] {
+      implicit object MyFormat extends Format[MyTaskResult] {
         def reads(in: Input): MyTaskResult = MyTaskResult(read[String](in))
         def writes(out: Output, value: MyTaskResult) = write(out, value.data)
       }
