@@ -233,7 +233,7 @@ the settings it requires.
 Sbt 0.13.2 provides the following plugin modules:
 
 * ``sbt.plugins.GlobalModule`` - Global task parallelism settings.
-* ``sbt.plguins.IvyModule``    - Settings for resolving/publishing to ivy.  Depends on ``GlobalModule``.
+* ``sbt.plugins.IvyModule``    - Settings for resolving/publishing to ivy.  Depends on ``GlobalModule``.
 * ``sbt.plugins.JvmModule``    - The remaining sbt default settings for compiling a Scala / Java project.   Depends on ``IvyModule``.
 
 
@@ -241,13 +241,14 @@ Providing a sequence of settings that users should manually enable
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This is the most common type of plugin, one which just provides a sequence of settings to enable its functionality.  An
-example is the sbt-native-packager plugin which provides different types of settings for different artifacts.  For example,
-the sbt-native-packager provides an "archetype" for compiling java servers which is used as follows in a ``build.sbt`` ::
+example is the sbt-native-packager plugin which provides different types of settings for different artifacts.  Prior to sbt
+0.13.2, for example, the sbt-native-packager provides an "archetype" for compiling java servers which is used as follows 
+in a ``build.sbt`` ::
 
     projectArchetypes.java_server
 
 This archetype denotes many layers of settings which need to be included that will allow the packager to generate appropriate
-packages for Debian, RedHat, Windows, etc.   However, it does not allow any downstream sbt plugins to make use of the
+packages for Debian, Red Hat, Windows, etc.   However, it does not allow any downstream sbt plugins to make use of the
 knowledge that we included the ``java_server`` settings vs. any other set of sbt-native-packager settings.   
 
 Some plugins would provide a setting which contains this information, something like ::
@@ -258,7 +259,7 @@ Some plugins would provide a setting which contains this information, something 
 
 Then, dependent plugins would have convolute settings to read this property and take appropriate action.
 
-The ``sbt.RootPlugin`` allows us to specify this information directly in the plugin model.   A "root" plugin is one which
+In sbt 0.13.2 the ``sbt.RootPlugin`` allows us to specify this information directly in the plugin model.   A "root" plugin is one which
 must be explicitly enabled on a project, *but* which other plugins can depend on to automatically inject their settings.
 
 Here's an example series of plugins which are all enabled by a "root" ``JavaServer`` plugin ::
@@ -284,7 +285,15 @@ settings to the project *after* the ``RootPlugin`` settings.   A user's ``build.
     val myAwesomeWebProject = project.in(file(".")).addPlugins(JavaServer)
 
 This should enable more seamless integration between plugins than existed before in the sbt ecosystem.  All plugins are encouraged
-to provide accurate ``select`` implementations and ``RootPlugin`` instances which others can depend on.
+to provide accurate ``select`` implementations and ``RootPlugin`` instances which others can depend on.  Previously,
+all plugins avoiding automatically adding settings because it left no control for users of which plugins could be added.  Now,
+user can explicitly disable any plugin on a project using the ``removePlugins`` method.  Here's an example where
+we remove the specific ``MyCompaniesRpmSettings`` from our project ::
+
+    val myAwesomeWebProject = project.in(file(".")).addPlugins(JavaServer).removePlugins(MyCompaniesRpmSettings)
+
+
+.. TODO - Changes to plugin best practices section (or reformating the above).
 
 
 Incremental Tasks
@@ -335,3 +344,4 @@ the sbinary library, which allows you to specify a binary serialization for clas
       }
 
     }
+
