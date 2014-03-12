@@ -4,16 +4,14 @@
 
 
 Sbt 0.13.2 brings a lot of new rich features with it, however it also represents a shift in some of the standard sbt-isms we've grown
-accostomed to.   This guide will walk through the following changes:
+accustomed to.   This guide will walk through the following changes:
 
 * ``AutoPlugin`` / ``AutoImport`` and the deprecation of ``sbt.Plugin`` and ``sbt.Defaults.defaultSettings``
 * Incremental task execution using ``.previous``
 * Migration to the name-hashing incremental compiler.
 
 
-Let's start with possibly the most intensive change to have happened in a binary compatible release in sbt:
-The deprecation of ``sbt.Defaults`` and the migration to ``AutoPlugin``.
-
+Let's start with the possibly breaking (semantic) changes.
 
 Breaking semantic changes
 =========================
@@ -57,7 +55,7 @@ from being loaded.   The new ``project/build.sbt`` ::
 
       val root = Project("root", file("."), settings = rootSettings)
         .aggregate(...)
-        .disablePlugins(plugins.GlobalModule)  // Required in 0.13.2 to remove deault settings.
+        .disablePlugins(plugins.GlobalModule)  // Required in 0.13.2 to remove default settings.
 
       ...
     }
@@ -107,7 +105,7 @@ more information please read :doc:`Setting Initialization <../Architecture/Setti
 Deprecation Migrations
 ======================
 
-The addition of auto-plugins has lead to the following two deprecation areas that do not require immedaite change, but
+The addition of auto-plugins has lead to the following two deprecation areas that do not require immediate change, but
 should be changed as soon as is practical.
 
 Migrating off ``Defaults.defaultSettings``
@@ -131,7 +129,7 @@ in the following ``project/build.scala`` file ::
 Starting in sbt 0.13.2, all default settings are provided by the core auto-plugins:  ``sbt.plugins.GlobalModule``, ``sbt.plugins.IvyModule`` and ``sbt.plugins.JvmModule``.   Autoplugin settings are injected *before* those configured in ``project/*.scala`` files.
 (For details see:  :doc:`Setting Initialization <../Architecture/Setting-Initialization>` ).
 
-This construct will not cause any failures in builds, but does duplicate the default setings in every project and prevents any
+This construct will not cause any failures in builds, but does duplicate the default settings in every project and prevents any
 auto-plugin attempts to remove settings from working.
 
 To fix, just drop the usage of ``Defaults.defaultSettings``, as shown in the updated ``project/build.scala`` ::
@@ -159,7 +157,7 @@ The ``sbt.Plugin`` class has been deprecated in place of three constructs:
 
 
 Each of these new constructs fills the previous needs of ``sbt.Plugin``, but in a safer, more controlled mechanism.
-Let's look at the three user cases of ``sbt.Plugin`` and how they map into the new features.
+Let's look at the three use cases of ``sbt.Plugin`` and how they map into the new features.
 
 Providing values that can be directly used in build.sbt
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -176,7 +174,7 @@ Existing plugins, like this one ::
       def helperFunction(...): Stuff = ...
     }
 
-should be modifed to just directly extend ``sbt.AutoImport`` ::
+should be modified to just directly extend ``sbt.AutoImport`` ::
 
     import sbt._
     object MyPlugin extends AutoImport {
@@ -190,7 +188,7 @@ In addition to directly extending ``sbt.AutoImport``, both the ``sbt.AutoPlugin`
 Many existing sbt plugins are simple libraries of re-usable setting sequences.  Migrating to ``sbt.AutoImport`` is the easiest
 path to migrate off of ``sbt.Plugin`` for these libraries.  
 
-.. TODO - Link to AutoPlugin docuemntation as well as encourage existing plugins to migrate to full AutoPlugin support.
+.. TODO - Link to AutoPlugin documentation as well as encourage existing plugins to migrate to full AutoPlugin support.
 
 
 Automatically injecting settings in to all projects/builds.
@@ -232,6 +230,12 @@ is the case for the sbt-pgp plugin, then it should depend on those ivy settings 
 This ensures that any project which has explicitly disabled the ``IvyModule`` plugin will not break when the ``SbtPgp`` plugin can't find
 the settings it requires.
 
+Sbt 0.13.2 provides the following plugin modules:
+
+* ``sbt.plugins.GlobalModule`` - Global task parallelism settings.
+* ``sbt.plguins.IvyModule``    - Settings for resolving/publishing to ivy.  Depends on ``GlobalModule``.
+* ``sbt.plugins.JvmModule``    - The remaining sbt default settings for compiling a Scala / Java project.   Depends on ``IvyModule``.
+
 
 Providing a sequence of settings that users should manually enable
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -252,7 +256,7 @@ Some plugins would provide a setting which contains this information, something 
     
     archetype := "Server"
 
-Then, dependent plugins would have convoluate settings to read this property and take appropriate action.
+Then, dependent plugins would have convolute settings to read this property and take appropriate action.
 
 The ``sbt.RootPlugin`` allows us to specify this information directly in the plugin model.   A "root" plugin is one which
 must be explicitly enabled on a project, *but* which other plugins can depend on to automatically inject their settings.
