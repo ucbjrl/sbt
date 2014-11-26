@@ -1,15 +1,14 @@
+package sbttest // you need package http://stackoverflow.com/questions/9822008/
+
 	import sbt._
-	import sbt.Keys.{name, resolvedScoped}
+	import sbt.Keys.{name, resolvedScoped, organization	}
 	import java.util.concurrent.atomic.{AtomicInteger => AInt}
 
-object AI extends AutoImport
+object Imports
 {
-	trait EmptyAutoPlugin extends AutoPlugin {
-		def select = Plugins.empty
-	}
-	object A extends EmptyAutoPlugin
-	object B extends EmptyAutoPlugin
-	object E extends EmptyAutoPlugin
+	object A extends AutoPlugin
+	object B extends AutoPlugin
+	object E extends AutoPlugin
 
 	lazy val q = config("q")
 	lazy val p = config("p").extend(q)
@@ -17,18 +16,35 @@ object AI extends AutoImport
 	lazy val demo = settingKey[String]("A demo setting.")
 	lazy val del = settingKey[String]("Another demo setting.")
 
-	lazy val check = settingKey[Unit]("Verifies settings are as they should be.")
+	lazy val check = taskKey[Unit]("Verifies settings are as they should be.")
 }
 
-	import AI._
+object OrgPlugin extends AutoPlugin {
+	override def trigger = allRequirements
+	override def projectSettings = Seq(
+      organization := "override"
+	)
+}
+
+object X extends AutoPlugin {
+	val autoImport = Imports
+}
+
+	import Imports._
 
 object D extends AutoPlugin {
-	def select: Plugins = E
+	override def requires: Plugins = E
+	override def trigger = allRequirements
+
+	object autoImport {
+		lazy val keyTest = settingKey[String]("Another demo setting.")
+	}
 }
 
 object Q extends AutoPlugin
 {
-	def select: Plugins = A && B
+	override def requires: Plugins = A && B
+	override def trigger = allRequirements
 
 	override def projectConfigurations: Seq[Configuration] =
 		p ::
@@ -56,12 +72,26 @@ object Q extends AutoPlugin
 object R extends AutoPlugin
 {
 	// NOTE - Only plugins themselves support exclusions...
-	def select = Q && !D
+	override def requires = Q
+	override def trigger = allRequirements
 
 	override def projectSettings = Seq(
-		// tests proper ordering: R requires C, so C settings should come first
+		// tests proper ordering: R requires Q, so Q settings should come first
 		del in q += " R",
 		// tests that configurations are properly registered, enabling delegation from p to q
 		demo += (del in p).value
+	)
+}
+
+// This is an opt-in plugin with a requirement
+// Unless explicitly loaded by the build user, this will not be activated.
+object S extends AutoPlugin
+{
+	override def requires = Q
+	override def trigger = noTrigger
+
+	override def projectSettings = Seq(
+		del in q += " S",
+		organization := "S"
 	)
 }
