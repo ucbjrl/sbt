@@ -44,9 +44,9 @@ object TopLevel {
 /** Checks the API of two source files for equality.*/
 object SameAPI {
   def apply(a: Source, b: Source): Boolean =
-    a.apiHash == b.apiHash && (a.hash.length > 0 && b.hash.length > 0) && apply(a.api, b.api)
+    a.apiHash == b.apiHash && (a.hash.nonEmpty && b.hash.nonEmpty) && apply(a.api, b.api)
 
-  def apply(a: Def, b: Def): Boolean =
+  def apply(a: Definition, b: Definition): Boolean =
     (new SameAPI(false, true)).sameDefinitions(List(a), List(b), true)
 
   def apply(a: SourceAPI, b: SourceAPI): Boolean =
@@ -89,14 +89,9 @@ object SameAPI {
    * All top-level definitions are always considered: 'private' only means package-private.
    * Other definitions are considered if they are not qualified with 'private[this]' or 'private'.
    */
-  def filterDefinitions(d: Seq[Definition], topLevel: Boolean, includePrivate: Boolean) = if (topLevel || includePrivate) d else d.filter(isNonPrivate)
-  def isNonPrivate(d: Definition): Boolean = isNonPrivate(d.access)
-  /** Returns false if the `access` is `Private` and qualified, true otherwise.*/
-  def isNonPrivate(access: Access): Boolean =
-    access match {
-      case p: Private if !p.qualifier.isInstanceOf[IdQualifier] => false
-      case _ => true
-    }
+  def filterDefinitions(d: Seq[Definition], topLevel: Boolean, includePrivate: Boolean) =
+    if (topLevel || includePrivate) d else d.filter(APIUtil.isNonPrivate)
+
 }
 /**
  * Used to implement API equality.

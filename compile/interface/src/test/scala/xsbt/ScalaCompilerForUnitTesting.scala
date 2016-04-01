@@ -12,6 +12,7 @@ import xsbti.api.Definition
 import xsbti.api.Def
 import xsbt.api.SameAPI
 import sbt.ConsoleLogger
+import xsbti.DependencyContext._
 
 import ScalaCompilerForUnitTesting.ExtractedSourceDependencies
 
@@ -30,9 +31,18 @@ class ScalaCompilerForUnitTesting(nameHashing: Boolean = false) {
     analysisCallback.apis(tempSrcFile)
   }
 
+  /**
+   * Compiles given source code using Scala compiler and returns API representation
+   * extracted by ExtractAPI class.
+   */
+  def extractApisFromSrcs(reuseCompilerInstance: Boolean)(srcs: List[String]*): Seq[SourceAPI] = {
+    val (tempSrcFiles, analysisCallback) = compileSrcs(srcs.toList, reuseCompilerInstance)
+    tempSrcFiles.map(analysisCallback.apis)
+  }
+
   def extractUsedNamesFromSrc(src: String): Set[String] = {
     val (Seq(tempSrcFile), analysisCallback) = compileSrcs(src)
-    analysisCallback.usedNames(tempSrcFile).toSet
+    analysisCallback.usedNames(tempSrcFile)
   }
 
   /**
@@ -45,7 +55,7 @@ class ScalaCompilerForUnitTesting(nameHashing: Boolean = false) {
   def extractUsedNamesFromSrc(definitionSrc: String, actualSrc: String): Set[String] = {
     // we drop temp src file corresponding to the definition src file
     val (Seq(_, tempSrcFile), analysisCallback) = compileSrcs(definitionSrc, actualSrc)
-    analysisCallback.usedNames(tempSrcFile).toSet
+    analysisCallback.usedNames(tempSrcFile)
   }
 
   /**
@@ -61,18 +71,18 @@ class ScalaCompilerForUnitTesting(nameHashing: Boolean = false) {
    * file system-independent way of testing dependencies between source code "files".
    */
   def extractDependenciesFromSrcs(srcs: List[Map[Symbol, String]]): ExtractedSourceDependencies = {
-    val rawGroupedSrcs = srcs.map(_.values.toList).toList
-    val symbols = srcs.map(_.keys).flatten
-    val (tempSrcFiles, testCallback) = compileSrcs(rawGroupedSrcs)
+    val rawGroupedSrcs = srcs.map(_.values.toList)
+    val symbols = srcs.flatMap(_.keys)
+    val (tempSrcFiles, testCallback) = compileSrcs(rawGroupedSrcs, reuseCompilerInstance = true)
     val fileToSymbol = (tempSrcFiles zip symbols).toMap
 
     val memberRefFileDeps = testCallback.sourceDependencies collect {
       // false indicates that those dependencies are not introduced by inheritance
-      case (target, src, false) => (src, target)
+      case (target, src, DependencyByMemberRef) => (src, target)
     }
     val inheritanceFileDeps = testCallback.sourceDependencies collect {
       // true indicates that those dependencies are introduced by inheritance
-      case (target, src, true) => (src, target)
+      case (target, src, DependencyByInheritance) => (src, target)
     }
     def toSymbols(src: File, target: File): (Symbol, Symbol) = (fileToSymbol(src), fileToSymbol(target))
     val memberRefDeps = memberRefFileDeps map { case (src, target) => toSymbols(src, target) }
@@ -106,18 +116,29 @@ class ScalaCompilerForUnitTesting(nameHashing: Boolean = false) {
    * useful to compile macros, which cannot be used in the same compilation run that
    * defines them.
    *
+   * The `reuseCompilerInstance` parameter controls whether the same Scala compiler instance
+   * is reused between compiling source groups. Separate compiler instances can be used to
+   * test stability of API representation (with respect to pickling) or to test handling of
+   * binary dependencies.
+   *
    * The sequence of temporary files corresponding to passed snippets and analysis
    * callback is returned as a result.
    */
-  private def compileSrcs(groupedSrcs: List[List[String]]): (Seq[File], TestCallback) = {
+  private def compileSrcs(groupedSrcs: List[List[String]],
+    reuseCompilerInstance: Boolean): (Seq[File], TestCallback) = {
     withTemporaryDirectory { temp =>
       val analysisCallback = new TestCallback(nameHashing)
       val classesDir = new File(temp, "classes")
       classesDir.mkdir()
 
-      val compiler = prepareCompiler(classesDir, analysisCallback, classesDir.toString)
+      lazy val commonCompilerInstance = prepareCompiler(classesDir, analysisCallback, classesDir.toString)
 
       val files = for ((compilationUnit, unitId) <- groupedSrcs.zipWithIndex) yield {
+        // use a separate instance of the compiler for each group of sources to
+        // have an ability to test for bugs in instability between source and pickled
+        // representation of types
+        val compiler = if (reuseCompilerInstance) commonCompilerInstance else
+          prepareCompiler(classesDir, analysisCallback, classesDir.toString)
         val run = new compiler.Run
         val srcFiles = compilationUnit.toSeq.zipWithIndex map {
           case (src, i) =>
@@ -136,7 +157,7 @@ class ScalaCompilerForUnitTesting(nameHashing: Boolean = false) {
   }
 
   private def compileSrcs(srcs: String*): (Seq[File], TestCallback) = {
-    compileSrcs(List(srcs.toList))
+    compileSrcs(List(srcs.toList), reuseCompilerInstance = true)
   }
 
   private def prepareSrcFile(baseDir: File, fileName: String, src: String): File = {
@@ -149,6 +170,7 @@ class ScalaCompilerForUnitTesting(nameHashing: Boolean = false) {
     val args = Array.empty[String]
     object output extends SingleOutput {
       def outputDirectory: File = outputDir
+      override def toString = s"SingleOutput($outputDirectory)"
     }
     val weakLog = new WeakLog(ConsoleLogger(), ConsoleReporter)
     val cachedCompiler = new CachedCompiler0(args, output, weakLog, false)

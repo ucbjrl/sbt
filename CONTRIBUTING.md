@@ -91,7 +91,7 @@ directory:
       notes/
         <target release>/
            <your-change-name>.md
-           
+
 Notes files should have the following contents:
 
 * Bullet item description under one of the following sections:
@@ -114,36 +114,30 @@ Build from source
 		$ git clone git://github.com/sbt/sbt.git
 		$ cd sbt
 
-3. The initial branch is the development branch [0.13](https://github.com/sbt/sbt/tree/0.13), which contains the latest code for the next major sbt release.  To build a specific release or commit, switch to the associated tag.  The tag for the latest stable release is [v0.13.6](https://github.com/sbt/sbt/tree/v0.13.6):
+3. The default branch is the development branch [0.13](https://github.com/sbt/sbt/tree/0.13), which contains the latest code for the next major sbt release.  To build a specific release or commit, switch to the associated tag.  The tag for the latest stable release is [v0.13.9](https://github.com/sbt/sbt/tree/v0.13.9):
 
-		$ git checkout v0.13.6
+		$ git checkout v0.13.9
 
-	Note that sbt is always built with the previous stable release.  For example, the [0.13](https://github.com/sbt/sbt/tree/0.13) branch is built with 0.13.2 and the [v0.13.2](https://github.com/sbt/sbt/tree/v0.13.2) tag is built with 0.13.1.
+	Note that sbt is always built with the previous stable release.  For example, the [0.13](https://github.com/sbt/sbt/tree/0.13) branch is built with 0.13.9 and the [v0.13.9](https://github.com/sbt/sbt/tree/v0.13.9) tag is built with 0.13.8.
 
 4. To build the launcher and publish all components locally,
 
 		$ sbt
 		> publishLocal
 
-5. To use this locally built version of sbt, copy your stable `~/bin/sbt` script to `~/bin/xsbt` and change it to use the launcher jar in `<sbt>/target/`.  For the v0.13.6 tag, the full location is:
+5. To use this locally built version of sbt, copy your stable `~/bin/sbt` script to `~/bin/xsbt` and change it to use the launcher jar at `<sbt>/launch/target/sbt-launch.jar`.
 
-		<sbt>/target/sbt-launch-0.13.6.jar
+	Directory `target` is removed by `clean` command. Second solution is using the artifact stored in the local ivy repository.
 
-	If using the 0.13 development branch, the launcher is at:
+	The launcher is located in:
 
-		<sbt>/target/sbt-launch-0.13.7-SNAPSHOT.jar
-		
-	Directory `target` is removed by clean command. Second solution is using artifact stored in local ivy repository.
-		
-	 The launcher is located in:
-		
-              $HOME/.ivy2/local/org.scala-sbt/sbt-launch/0.13.6/jars/sbt-launch.jar
-                
-        for v0.13.6 tag, or in:
-                
-              $HOME/.ivy2/local/org.scala-sbt/sbt-launch/0.13.7-SNAPSHOT/jars/sbt-launch.jar
-                
-        for development branch.
+    $HOME/.ivy2/local/org.scala-sbt/sbt-launch/0.13.9/jars/sbt-launch.jar
+
+	for v0.13.9 tag, or in:
+
+    $HOME/.ivy2/local/org.scala-sbt/sbt-launch/0.13.10-SNAPSHOT/jars/sbt-launch.jar
+
+	for the development branch.
 
 ## Modifying sbt
 
@@ -153,9 +147,45 @@ Build from source
 
 3. After each `publishLocal`, clean the `~/.sbt/boot/` directory.  Alternatively, if sbt is running and the launcher hasn't changed, run `reboot full` to have sbt do this for you.
 
-4. If a project has `project/build.properties` defined, either delete the file or change `sbt.version` to `0.13.7-SNAPSHOT`.
+4. If a project has `project/build.properties` defined, either delete the file or change `sbt.version` to `0.13.10-SNAPSHOT`.
+
+## Diagnosing build failures
+
+Globally included plugins can interfere building `sbt`; if you are getting errors building sbt, try disabling all globally included plugins and try again.
+
+Running Tests
+=============
+
+sbt has an extensive test suite of Unit tests and Integration tests!
+
+Unit / Functional tests
+-----------------------
+
+Various functional and unit tests are defined throughout the
+project. To run all of them, run `sbt test`. You can run a single test
+suite with `sbt testOnly`
+
+Integration tests
+-----------------
+
+Scripted integration tests reside in `sbt/src/sbt-test` and are
+written using the same testing infrastructure sbt plugin authors can
+use to test their own plugins with sbt. You can read more about this
+style of tests [here](http://eed3si9n.com/testing-sbt-plugins).
+
+You can run the integration tests with the `sbt scripted` sbt
+command. To run a single test, such as the test in
+`sbt/src/sbt-test/project/global-plugin`, simply run:
+
+    sbt "scripted project/global-plugin"
+
+Please note that these tests run PAINFULLY slow if the version set in
+`build.sbt` is set to SNAPSHOT, as every time the scripted test boots
+up a test instance of sbt, remote mirrors are scanned for possible
+updates. It is recommended that you set the version suffix to
+`-devel`, as in `0.13.10-devel`.
 
 Building Documentation
-----------------------
+======================
 
 The scala-sbt.org site documentation is a separate project [website](https://github.com/sbt/website). Follow [the steps in the README](https://github.com/sbt/website#scala-sbtorg) to generate the documentation.

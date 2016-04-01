@@ -7,6 +7,7 @@ package inc
 import xsbti.api.{ Source, Compilation }
 import xsbti.{ Position, Problem, Severity }
 import xsbti.compile.{ CompileOrder, Output => APIOutput, SingleOutput, MultipleOutput }
+import xsbti.DependencyContext._
 import MultipleOutput.OutputGroup
 import java.io.File
 import sbinary._
@@ -36,7 +37,7 @@ object AnalysisFormats {
         time(label + ".read.end")
         r
       }
-    def writes(out: Output, t: T) {
+    def writes(out: Output, t: T): Unit = {
       time(label + ".write.start")
       f.writes(out, t)
       time(label + ".write.end")
@@ -76,7 +77,13 @@ object AnalysisFormats {
   implicit val multipleOutputFormat: Format[MultipleOutput] =
     wrap[MultipleOutput, Array[OutputGroup]](
       (_.outputGroups),
-      { groups => new MultipleOutput { def outputGroups = groups } }
+      {
+        groups =>
+          new MultipleOutput {
+            def outputGroups = groups
+            override def toString = s"MultipleOutput($outputGroups)"
+          }
+      }
     )
   implicit val singleOutputFormat: Format[SingleOutput] =
     wrap[SingleOutput, File](

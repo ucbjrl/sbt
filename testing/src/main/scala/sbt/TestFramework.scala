@@ -22,7 +22,7 @@ object TestFrameworks {
   val JUnit = new TestFramework("com.novocode.junit.JUnitFramework")
 }
 
-case class TestFramework(val implClassNames: String*) {
+case class TestFramework(implClassNames: String*) {
   @tailrec
   private def createFramework(loader: ClassLoader, log: Logger, frameworkClassNames: List[String]): Option[Framework] = {
     frameworkClassNames match {
@@ -70,7 +70,7 @@ final class TestRunner(delegate: Runner, listeners: Seq[TestReportListener], log
         {
           // here we get the results! here is where we'd pass in the event listener
           val results = new scala.collection.mutable.ListBuffer[Event]
-          val handler = new EventHandler { def handle(e: Event) { results += e } }
+          val handler = new EventHandler { def handle(e: Event): Unit = { results += e } }
           val loggers = listeners.flatMap(_.contentLogger(testDefinition))
           val nestedTasks =
             try testTask.execute(handler, loggers.map(_.log).toArray)
@@ -145,12 +145,12 @@ object TestFramework {
     {
       import scala.collection.mutable.{ HashMap, HashSet, Set }
       val map = new HashMap[Framework, Set[TestDefinition]]
-      def assignTest(test: TestDefinition) {
+      def assignTest(test: TestDefinition): Unit = {
         def isTestForFramework(framework: Framework) = getFingerprints(framework).exists { t => matches(t, test.fingerprint) }
         for (framework <- frameworks.find(isTestForFramework))
           map.getOrElseUpdate(framework, new HashSet[TestDefinition]) += test
       }
-      if (!frameworks.isEmpty)
+      if (frameworks.nonEmpty)
         for (test <- tests) assignTest(test)
       map.toMap.mapValues(_.toSet)
     }

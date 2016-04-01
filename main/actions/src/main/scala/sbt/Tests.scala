@@ -133,7 +133,7 @@ object Tests {
       for (option <- config.options) {
         option match {
           case Filter(include)          => testFilters += include
-          case Filters(includes)        => if (!orderedFilters.isEmpty) sys.error("Cannot define multiple ordered test filters.") else orderedFilters = includes
+          case Filters(includes)        => if (orderedFilters.nonEmpty) sys.error("Cannot define multiple ordered test filters.") else orderedFilters = includes
           case Exclude(exclude)         => excludeTestsSet ++= exclude
           case Listeners(listeners)     => testListeners ++= listeners
           case Setup(setupFunction)     => setup += setupFunction
@@ -142,9 +142,9 @@ object Tests {
         }
       }
 
-      if (excludeTestsSet.size > 0)
+      if (excludeTestsSet.nonEmpty)
         log.debug(excludeTestsSet.mkString("Excluding tests: \n\t", "\n\t", ""))
-      if (undefinedFrameworks.size > 0)
+      if (undefinedFrameworks.nonEmpty)
         log.warn("Arguments defined for test frameworks that are not present:\n\t" + undefinedFrameworks.mkString("\n\t"))
 
       def includeTest(test: TestDefinition) = !excludeTestsSet.contains(test.name) && testFilters.forall(filter => filter(test.name))

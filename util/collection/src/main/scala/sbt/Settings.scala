@@ -17,21 +17,21 @@ sealed trait Settings[Scope] {
 }
 
 private final class Settings0[Scope](val data: Map[Scope, AttributeMap], val delegates: Scope => Seq[Scope]) extends Settings[Scope] {
-  def scopes: Set[Scope] = data.keySet.toSet
+  def scopes: Set[Scope] = data.keySet
   def keys(scope: Scope) = data(scope).keys.toSet
-  def allKeys[T](f: (Scope, AttributeKey[_]) => T): Seq[T] = data.flatMap { case (scope, map) => map.keys.map(k => f(scope, k)) } toSeq;
+  def allKeys[T](f: (Scope, AttributeKey[_]) => T): Seq[T] = data.flatMap { case (scope, map) => map.keys.map(k => f(scope, k)) } toSeq
 
   def get[T](scope: Scope, key: AttributeKey[T]): Option[T] =
     delegates(scope).toStream.flatMap(sc => getDirect(sc, key)).headOption
   def definingScope(scope: Scope, key: AttributeKey[_]): Option[Scope] =
-    delegates(scope).toStream.filter(sc => getDirect(sc, key).isDefined).headOption
+    delegates(scope).toStream.find(sc => getDirect(sc, key).isDefined)
 
   def getDirect[T](scope: Scope, key: AttributeKey[T]): Option[T] =
     (data get scope).flatMap(_ get key)
 
   def set[T](scope: Scope, key: AttributeKey[T], value: T): Settings[Scope] =
     {
-      val map = (data get scope) getOrElse AttributeMap.empty
+      val map = data getOrElse (scope, AttributeMap.empty)
       val newData = data.updated(scope, map.put(key, value))
       new Settings0(newData, delegates)
     }
@@ -85,7 +85,7 @@ trait Init[Scope] {
    */
   private[sbt] final def validated[T](key: ScopedKey[T], selfRefOk: Boolean): ValidationCapture[T] = new ValidationCapture(key, selfRefOk)
 
-  @deprecated("0.13.7", "Use the version with default arguments and default paramter.")
+  @deprecated("Use the version with default arguments and default parameter.", "0.13.7")
   final def derive[T](s: Setting[T], allowDynamic: Boolean, filter: Scope => Boolean, trigger: AttributeKey[_] => Boolean): Setting[T] =
     derive(s, allowDynamic, filter, trigger, false)
   /**
@@ -244,7 +244,12 @@ trait Init[Scope] {
     @deprecated("Use the non-deprecated Undefined factory method.", "0.13.1")
     def this(definingKey: ScopedKey[_], referencedKey: ScopedKey[_], derived: Boolean) = this(fakeUndefinedSetting(definingKey, derived), referencedKey)
   }
-  final class RuntimeUndefined(val undefined: Seq[Undefined]) extends RuntimeException("References to undefined settings at runtime.")
+  final class RuntimeUndefined(val undefined: Seq[Undefined]) extends RuntimeException("References to undefined settings at runtime.") {
+    override def getMessage =
+      super.getMessage + undefined.map { u =>
+        "\n" + u.defining + " referenced from " + u.referencedKey
+      }.mkString
+  }
 
   @deprecated("Use the other overload.", "0.13.1")
   def Undefined(definingKey: ScopedKey[_], referencedKey: ScopedKey[_], derived: Boolean): Undefined =
@@ -258,7 +263,7 @@ trait Init[Scope] {
   def Undefined(defining: Setting[_], referencedKey: ScopedKey[_]): Undefined = new Undefined(defining, referencedKey)
   def Uninitialized(validKeys: Seq[ScopedKey[_]], delegates: Scope => Seq[Scope], keys: Seq[Undefined], runtime: Boolean)(implicit display: Show[ScopedKey[_]]): Uninitialized =
     {
-      assert(!keys.isEmpty)
+      assert(keys.nonEmpty)
       val suffix = if (keys.length > 1) "s" else ""
       val prefix = if (runtime) "Runtime reference" else "Reference"
       val keysString = keys.map(u => showUndefined(u, validKeys, delegates)).mkString("\n\n  ", "\n\n  ", "")
@@ -291,7 +296,7 @@ trait Init[Scope] {
   def definedAtString(settings: Seq[Setting[_]]): String =
     {
       val posDefined = settings.flatMap(_.positionString.toList)
-      if (posDefined.size > 0) {
+      if (posDefined.nonEmpty) {
         val header = if (posDefined.size == settings.size) "defined at:" else
           "some of the defining occurrences:"
         header + (posDefined.distinct mkString ("\n\t", "\n\t", "\n"))
@@ -349,7 +354,7 @@ trait Init[Scope] {
 
       // set of defined scoped keys, used to ensure a derived setting is only added if all dependencies are present
       val defined = new mutable.HashSet[ScopedKey[_]]
-      def addDefs(ss: Seq[Setting[_]]) { for (s <- ss) defined += s.key }
+      def addDefs(ss: Seq[Setting[_]]): Unit = { for (s <- ss) defined += s.key }
       addDefs(defs)
 
       // true iff the scoped key is in `defined`, taking delegation into account
@@ -487,7 +492,7 @@ trait Init[Scope] {
     override def default(_id: => Long): DefaultSetting[T] = new DerivedSetting[T](sk, i, p, filter, trigger) with DefaultSetting[T] { val id = _id }
     override def toString = "derived " + super.toString
   }
-  // Only keep the first occurence of this setting and move it to the front so that it has lower precedence than non-defaults.
+  // Only keep the first occurrence of this setting and move it to the front so that it has lower precedence than non-defaults.
   //  This is intended for internal sbt use only, where alternatives like Plugin.globalSettings are not available.
   private[Init] sealed trait DefaultSetting[T] extends Setting[T] {
     val id: Long

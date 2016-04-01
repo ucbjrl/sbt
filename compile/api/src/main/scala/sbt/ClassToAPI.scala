@@ -3,6 +3,7 @@ package sbt
 import java.lang.reflect.{ Array => _, _ }
 import java.lang.annotation.Annotation
 import annotation.tailrec
+import sbt.classfile.ClassFile
 import xsbti.api
 import xsbti.SafeLazy
 import SafeLazy.strict
@@ -25,7 +26,7 @@ object ClassToAPI {
     }
 
   // Avoiding implicit allocation.
-  private def arrayMap[T <: AnyRef, U <: AnyRef: ClassManifest](xs: Array[T])(f: T => U): Array[U] = {
+  private def arrayMap[T <: AnyRef, U <: AnyRef: reflect.ClassTag](xs: Array[T])(f: T => U): Array[U] = {
     val len = xs.length
     var i = 0
     val res = new Array[U](len)
@@ -43,7 +44,11 @@ object ClassToAPI {
     c.getEnclosingClass eq null
 
   final class ClassMap private[sbt] (private[sbt] val memo: mutable.Map[String, Seq[api.ClassLike]], private[sbt] val inherited: mutable.Set[Class[_]], private[sbt] val lz: mutable.Buffer[xsbti.api.Lazy[_]]) {
-    def clear() { memo.clear(); inherited.clear(); lz.clear() }
+    def clear(): Unit = {
+      memo.clear()
+      inherited.clear()
+      lz.clear()
+    }
   }
   def emptyClassMap: ClassMap = new ClassMap(new mutable.HashMap, new mutable.HashSet, new mutable.ListBuffer)
 
@@ -67,21 +72,26 @@ object ClassToAPI {
     }
 
   /** Returns the (static structure, instance structure, inherited classes) for `c`. */
-  def structure(c: Class[_], enclPkg: Option[String], cmap: ClassMap): (api.Structure, api.Structure) =
-    {
-      val methods = mergeMap(c, c.getDeclaredMethods, c.getMethods, methodToDef(enclPkg))
-      val fields = mergeMap(c, c.getDeclaredFields, c.getFields, fieldToDef(enclPkg))
-      val constructors = mergeMap(c, c.getDeclaredConstructors, c.getConstructors, constructorToDef(enclPkg))
-      val classes = merge[Class[_]](c, c.getDeclaredClasses, c.getClasses, toDefinitions(cmap), (_: Seq[Class[_]]).partition(isStatic), _.getEnclosingClass != c)
-      val all = (methods ++ fields ++ constructors ++ classes)
-      val parentJavaTypes = allSuperTypes(c)
-      if (!Modifier.isPrivate(c.getModifiers))
-        cmap.inherited ++= parentJavaTypes.collect { case c: Class[_] => c }
-      val parentTypes = types(parentJavaTypes)
-      val instanceStructure = new api.Structure(lzyS(parentTypes.toArray), lzyS(all.declared.toArray), lzyS(all.inherited.toArray))
-      val staticStructure = new api.Structure(lzyEmptyTpeArray, lzyS(all.staticDeclared.toArray), lzyS(all.staticInherited.toArray))
-      (staticStructure, instanceStructure)
-    }
+  def structure(c: Class[_], enclPkg: Option[String], cmap: ClassMap): (api.Structure, api.Structure) = {
+    lazy val cf = classFileForClass(c)
+    val methods = mergeMap(c, c.getDeclaredMethods, c.getMethods, methodToDef(enclPkg))
+    val fields = mergeMap(c, c.getDeclaredFields, c.getFields, fieldToDef(c, cf, enclPkg))
+    val constructors = mergeMap(c, c.getDeclaredConstructors, c.getConstructors, constructorToDef(enclPkg))
+    val classes = merge[Class[_]](c, c.getDeclaredClasses, c.getClasses, toDefinitions(cmap), (_: Seq[Class[_]]).partition(isStatic), _.getEnclosingClass != c)
+    val all = methods ++ fields ++ constructors ++ classes
+    val parentJavaTypes = allSuperTypes(c)
+    if (!Modifier.isPrivate(c.getModifiers))
+      cmap.inherited ++= parentJavaTypes.collect { case c: Class[_] => c }
+    val parentTypes = types(parentJavaTypes)
+    val instanceStructure = new api.Structure(lzyS(parentTypes.toArray), lzyS(all.declared.toArray), lzyS(all.inherited.toArray))
+    val staticStructure = new api.Structure(lzyEmptyTpeArray, lzyS(all.staticDeclared.toArray), lzyS(all.staticInherited.toArray))
+    (staticStructure, instanceStructure)
+  }
+
+  /** TODO: over time, ClassToAPI should switch the majority of access to the classfile parser */
+  private[this] def classFileForClass(c: Class[_]): ClassFile =
+    classfile.Parser.apply(IO.classfileLocation(c))
+
   private[this] def lzyS[T <: AnyRef](t: T): xsbti.api.Lazy[T] = lzy(t)
   def lzy[T <: AnyRef](t: => T): xsbti.api.Lazy[T] = xsbti.SafeLazy(t)
   private[this] def lzy[T <: AnyRef](t: => T, cmap: ClassMap): xsbti.api.Lazy[T] = {
@@ -111,7 +121,7 @@ object ClassToAPI {
       }
       @tailrec def flattenAll(interfaces: Seq[Type], accum: Seq[Type] = Seq.empty): Seq[Type] =
         {
-          if (!interfaces.isEmpty) {
+          if (interfaces.nonEmpty) {
             val raw = interfaces map { case p: ParameterizedType => p.getRawType; case i => i }
             val children = raw flatMap { case i: Class[_] => i.getGenericInterfaces; case _ => Seq.empty }
             flattenAll(children, accum ++ interfaces ++ children)
@@ -127,15 +137,58 @@ object ClassToAPI {
   def upperBounds(ts: Array[Type]): api.Type =
     new api.Structure(lzy(types(ts)), lzyEmptyDefArray, lzyEmptyDefArray)
 
-  def fieldToDef(enclPkg: Option[String])(f: Field): api.FieldLike =
+  @deprecated("Use fieldToDef[4] instead", "0.13.9")
+  def fieldToDef(enclPkg: Option[String])(f: Field): api.FieldLike = {
+    val c = f.getDeclaringClass()
+    fieldToDef(c, classFileForClass(c), enclPkg)(f)
+  }
+
+  def fieldToDef(c: Class[_], cf: => ClassFile, enclPkg: Option[String])(f: Field): api.FieldLike =
     {
       val name = f.getName
       val accs = access(f.getModifiers, enclPkg)
       val mods = modifiers(f.getModifiers)
       val annots = annotations(f.getDeclaredAnnotations)
-      val tpe = reference(returnType(f))
-      if (mods.isFinal) new api.Val(tpe, name, accs, mods, annots) else new api.Var(tpe, name, accs, mods, annots)
+      val fieldTpe = reference(returnType(f))
+      // generate a more specific type for constant fields
+      val specificTpe: Option[api.Type] =
+        if (mods.isFinal) {
+          try {
+            cf.constantValue(name).map(singletonForConstantField(c, f, _))
+          } catch {
+            case e: Throwable =>
+              throw new IllegalStateException(
+                s"Failed to parse $c: this may mean your classfiles are corrupted. Please clean and try again.",
+                e
+              )
+          }
+        } else {
+          None
+        }
+      val tpe = specificTpe.getOrElse(fieldTpe)
+      if (mods.isFinal) {
+        new api.Val(tpe, name, accs, mods, annots)
+      } else {
+        new api.Var(tpe, name, accs, mods, annots)
+      }
     }
+
+  /**
+   * Creates a Singleton type that includes both the type and ConstantValue for the given Field.
+   *
+   * Since java compilers are allowed to inline constant (static final primitive) fields in
+   * downstream classfiles, we generate a type that will cause APIs to match only when both
+   * the type and value of the field match. We include the classname mostly for readability.
+   *
+   * Because this type is purely synthetic, it's fine that the name might contain filename-
+   * banned characters.
+   */
+  private def singletonForConstantField(c: Class[_], field: Field, constantValue: AnyRef) =
+    new api.Singleton(
+      pathFromStrings(
+        c.getName.split("\\.").toSeq :+ (field.getName + "$" + returnType(field) + "$" + constantValue)
+      )
+    )
 
   def methodToDef(enclPkg: Option[String])(m: Method): api.Def =
     defLike(m.getName, m.getModifiers, m.getDeclaredAnnotations, typeParameterTypes(m), m.getParameterAnnotations, parameterTypes(m), Option(returnType(m)), exceptionTypes(m), m.isVarArgs, enclPkg)
@@ -208,7 +261,7 @@ object ClassToAPI {
   def modifiers(i: Int): api.Modifiers =
     {
       import Modifier.{ isAbstract, isFinal }
-      new api.Modifiers(isAbstract(i), false, isFinal(i), false, false, false, false)
+      new api.Modifiers(isAbstract(i), false, isFinal(i), false, false, false, false, false)
     }
   def access(i: Int, pkg: Option[String]): api.Access =
     {
@@ -242,7 +295,7 @@ object ClassToAPI {
   def referenceP(t: ParameterizedType): api.Parameterized =
     {
       val targs = t.getActualTypeArguments
-      val args = if (targs.length == 0) emptyTypeArray else arrayMap(targs)(t => reference(t): api.Type)
+      val args = if (targs.isEmpty) emptyTypeArray else arrayMap(targs)(t => reference(t): api.Type)
       val base = reference(t.getRawType)
       new api.Parameterized(base, args.toArray[api.Type])
     }
@@ -256,7 +309,9 @@ object ClassToAPI {
     }
 
   def pathFromString(s: String): api.Path =
-    new api.Path(s.split("\\.").map(new api.Id(_)) :+ ThisRef)
+    pathFromStrings(s.split("\\."))
+  def pathFromStrings(ss: Seq[String]): api.Path =
+    new api.Path((ss.map(new api.Id(_)) :+ ThisRef).toArray)
   def packageName(c: Class[_]) = packageAndName(c)._1
   def packageAndName(c: Class[_]): (Option[String], String) =
     packageAndName(c.getName)

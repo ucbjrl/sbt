@@ -8,6 +8,8 @@ import java.io.File
 import Relations.Source
 import Relations.SourceDependencies
 import xsbti.api.{ Source => APISource }
+import xsbti.DependencyContext
+import xsbti.DependencyContext._
 
 /**
  * Provides mappings between source files, generated classes (products), and binaries.
@@ -616,13 +618,14 @@ private class MRelationsDefaultImpl(srcProd: Relation[File, File], binaryDep: Re
 
   override def toString = (
     """
-	  |Relations:
-	  |  products: %s
-	  |  bin deps: %s
-	  |  src deps: %s
-	  |  ext deps: %s
-	  |  class names: %s
-	  """.trim.stripMargin.format(List(srcProd, binaryDep, internalSrcDep, externalDep, classes) map relation_s: _*)
+    |Relations:
+    |  products: %s
+    |  bin deps: %s
+    |  src deps direct: %s
+    |  src deps inherited: %s
+    |  ext deps: %s
+    |  class names: %s
+    """.trim.stripMargin.format(List(srcProd, binaryDep, internalSrcDep, publicInherited.internal, externalDep, classes) map relation_s: _*)
   )
 }
 
@@ -638,10 +641,10 @@ private class MRelationsNameHashing(srcProd: Relation[File, File], binaryDep: Re
     val names: Relation[File, String]) extends MRelationsCommon(srcProd, binaryDep, classes) {
   def direct: Source =
     throw new UnsupportedOperationException("The `direct` source dependencies relation is not supported " +
-      "when `nameHashing` flag is disabled.")
+      "when `nameHashing` flag is enabled.")
   def publicInherited: Source =
     throw new UnsupportedOperationException("The `publicInherited` source dependencies relation is not supported " +
-      "when `nameHashing` flag is disabled.")
+      "when `nameHashing` flag is enabled.")
 
   val nameHashing: Boolean = true
 
@@ -737,14 +740,15 @@ private class MRelationsNameHashing(srcProd: Relation[File, File], binaryDep: Re
 
   override def toString = (
     """
-	  |Relations (with name hashing enabled):
-	  |  products: %s
-	  |  bin deps: %s
-	  |  src deps: %s
-	  |  ext deps: %s
-	  |  class names: %s
-	  |  used names: %s
-	  """.trim.stripMargin.format(List(srcProd, binaryDep, internalSrcDep, externalDep, classes, names) map relation_s: _*)
+    |Relations (with name hashing enabled):
+    |  products: %s
+    |  bin deps: %s
+    |  src deps memberRef: %s
+    |  src deps inheritance: %s
+    |  ext deps: %s
+    |  class names: %s
+    |  used names: %s
+    """.trim.stripMargin.format(List(srcProd, binaryDep, memberRef.internal, inheritance.internal, externalDep, classes, names) map relation_s: _*)
   )
 
 }

@@ -14,6 +14,10 @@ import javax.tools.Diagnostic.NOPOS
 final class DiagnosticsReporter(reporter: Reporter) extends DiagnosticListener[JavaFileObject] {
   val END_OF_LINE_MATCHER = "(\r\n)|[\r]|[\n]"
   val EOL = System.getProperty("line.separator")
+
+  private[this] var errorEncountered = false
+  def hasErrors: Boolean = errorEncountered
+
   private def fixedDiagnosticMessage(d: Diagnostic[_ <: JavaFileObject]): String = {
     def getRawMessage = d.getMessage(null)
     def fixWarnOrErrorMessage = {
@@ -46,7 +50,7 @@ final class DiagnosticsReporter(reporter: Reporter) extends DiagnosticListener[J
         Option(source).map(_.toUri.toString)
     }
   }
-  override def report(d: Diagnostic[_ <: JavaFileObject]) {
+  override def report(d: Diagnostic[_ <: JavaFileObject]): Unit = {
     val severity =
       d.getKind match {
         case Diagnostic.Kind.ERROR => Severity.Error
@@ -69,18 +73,38 @@ final class DiagnosticsReporter(reporter: Reporter) extends DiagnosticListener[J
         def startPosition: Option[Long] = checkNoPos(d.getStartPosition)
         def endPosition: Option[Long] = checkNoPos(d.getEndPosition)
         override val offset: Maybe[Integer] = Logger.o2m(checkNoPos(d.getPosition) map { x => new Integer(x.toInt) })
-        // TODO - Is this pulling contents of the line correctly?
-        // Would be ok to just return null if this version of the JDK doesn't support grabbing
-        // source lines?
-        override def lineContent: String =
-          Option(d.getSource) match {
-            case Some(source: JavaFileObject) =>
-              (Option(source.getCharContent(true)), startPosition, endPosition) match {
-                case (Some(cc), Some(start), Some(end)) => cc.subSequence(start.toInt, end.toInt).toString
-                case _                                  => ""
+        override def lineContent: String = {
+          def getDiagnosticLine: Option[String] =
+            try {
+              // See com.sun.tools.javac.api.ClientCodeWrapper.DiagnosticSourceUnwrapper
+              val diagnostic = d.getClass.getField("d").get(d)
+              // See com.sun.tools.javac.util.JCDiagnostic#getDiagnosticSource
+              val getDiagnosticSourceMethod = diagnostic.getClass.getDeclaredMethod("getDiagnosticSource")
+              val getPositionMethod = diagnostic.getClass.getDeclaredMethod("getPosition")
+              (Option(getDiagnosticSourceMethod.invoke(diagnostic)), Option(getPositionMethod.invoke(diagnostic))) match {
+                case (Some(diagnosticSource), Some(position: java.lang.Long)) =>
+                  // See com.sun.tools.javac.util.DiagnosticSource
+                  val getLineMethod = diagnosticSource.getClass.getMethod("getLine", Integer.TYPE)
+                  Option(getLineMethod.invoke(diagnosticSource, new Integer(position.intValue()))).map(_.toString)
+                case _ => None
               }
-            case _ => ""
-          }
+            } catch {
+              // TODO - catch ReflectiveOperationException once sbt is migrated to JDK7
+              case ignored: Throwable => None
+            }
+
+          def getExpression: String =
+            Option(d.getSource) match {
+              case Some(source: JavaFileObject) =>
+                (Option(source.getCharContent(true)), startPosition, endPosition) match {
+                  case (Some(cc), Some(start), Some(end)) => cc.subSequence(start.toInt, end.toInt).toString
+                  case _                                  => ""
+                }
+              case _ => ""
+            }
+
+          getDiagnosticLine.getOrElse(getExpression)
+        }
         private val sourceUri = fixSource(d.getSource)
         override val sourcePath = Logger.o2m(sourceUri)
         override val sourceFile = Logger.o2m(sourceUri.map(new File(_)))
@@ -90,6 +114,7 @@ final class DiagnosticsReporter(reporter: Reporter) extends DiagnosticListener[J
           if (sourceUri.isDefined) s"${sourceUri.get}:${if (line.isDefined) line.get else -1}"
           else ""
       }
+    if (severity == Severity.Error) errorEncountered = true
     reporter.log(pos, msg, severity)
   }
 }

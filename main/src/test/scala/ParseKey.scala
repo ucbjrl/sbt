@@ -31,7 +31,7 @@ object ParseKey extends Properties("Key parser test") {
         parseExpected(structure, string, expected, mask)
     }
 
-  property("An unspecified project axis resolves to the current project") =
+  property("An unspecified project axis resolves to the current project or the build of the current project") =
     forAllNoShrink(structureDefinedKey) { (skm: StructureKeyMask) =>
       import skm.{ structure, key }
 
@@ -43,7 +43,7 @@ object ParseKey extends Properties("Key parser test") {
         ("Current: " + structure.current) |:
         parse(structure, string) {
           case Left(err) => false
-          case Right(sk) => sk.scope.project == Select(structure.current)
+          case Right(sk) => sk.scope.project == Select(structure.current) || sk.scope.project == Select(BuildRef(structure.current.build))
         }
     }
 
@@ -123,7 +123,7 @@ object ParseKey extends Properties("Key parser test") {
   // so that it will use the passed-in `Gen` rather than the one imported
   // from TestBuild.
   def structureGenF(f: (Seq[Scope], Env, ProjectRef) => Structure)(implicit mkEnv: Gen[Env]): Gen[Structure] =
-    structureGen((s, e, p) => Gen.value(f(s, e, p)))
+    structureGen((s, e, p) => Gen.const(f(s, e, p)))
   // Here we're shadowing the in-scope implicit called `mkEnv` for this method
   // so that it will use the passed-in `Gen` rather than the one imported
   // from TestBuild.

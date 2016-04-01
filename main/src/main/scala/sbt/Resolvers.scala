@@ -58,26 +58,34 @@ object Resolvers {
   val mercurial: Resolver = new DistributedVCS {
     override val scheme = "hg"
 
-    override def clone(from: String, to: File) {
+    override def clone(from: String, to: File): Unit = {
       run("hg", "clone", "-q", from, to.getAbsolutePath)
     }
 
-    override def checkout(branch: String, in: File) {
+    override def checkout(branch: String, in: File): Unit = {
       run(Some(in), "hg", "checkout", "-q", branch)
     }
   }.toResolver
 
-  val git: Resolver = new DistributedVCS {
-    override val scheme = "git"
+  val git: Resolver = (info: ResolveInfo) => {
+    val uri = info.uri.withoutMarkerScheme
+    val localCopy = uniqueSubdirectoryFor(uri.copy(scheme = "git"), in = info.staging)
+    val from = uri.withoutFragment.toASCIIString
 
-    override def clone(from: String, to: File) {
-      run("git", "clone", from, to.getAbsolutePath)
+    if (uri.hasFragment) {
+      val branch = uri.getFragment
+      Some { () =>
+        creates(localCopy) {
+          run("git", "clone", from, localCopy.getAbsolutePath)
+          run(Some(localCopy), "git", "checkout", "-q", branch)
+        }
+      }
+    } else Some { () =>
+      creates(localCopy) {
+        run("git", "clone", "--depth", "1", from, localCopy.getAbsolutePath)
+      }
     }
-
-    override def checkout(branch: String, in: File) {
-      run(Some(in), "git", "checkout", "-q", branch)
-    }
-  }.toResolver
+  }
 
   abstract class DistributedVCS {
     val scheme: String
@@ -113,11 +121,10 @@ object Resolvers {
     isWindows && !isCygwin
   }
 
-  def run(command: String*) {
+  def run(command: String*): Unit =
     run(None, command: _*)
-  }
 
-  def run(cwd: Option[File], command: String*) {
+  def run(cwd: Option[File], command: String*): Unit = {
     val result = Process(
       if (onWindows) "cmd" +: "/c" +: command
       else command,

@@ -17,12 +17,20 @@ object ScalaArtifacts {
   val LibraryID = ScalaLibraryID
   val CompilerID = ScalaCompilerID
   val ReflectID = "scala-reflect"
+  val DottyIDPrefix = "dotty"
+
+  def dottyID(binaryVersion: String): String = s"${DottyIDPrefix}_${binaryVersion}"
+
   def libraryDependency(version: String): ModuleID = ModuleID(Organization, LibraryID, version)
 
-  private[sbt] def toolDependencies(org: String, version: String): Seq[ModuleID] = Seq(
-    scalaToolDependency(org, ScalaArtifacts.CompilerID, version),
-    scalaToolDependency(org, ScalaArtifacts.LibraryID, version)
-  )
+  private[sbt] def toolDependencies(org: String, version: String, isDotty: Boolean = false): Seq[ModuleID] =
+    if (isDotty)
+      Seq(ModuleID(org, DottyIDPrefix, version, Some(Configurations.ScalaTool.name + "->compile"),
+        crossVersion = CrossVersion.binary))
+    else
+      Seq(scalaToolDependency(org, ScalaArtifacts.CompilerID, version),
+        scalaToolDependency(org, ScalaArtifacts.LibraryID, version))
+
   private[this] def scalaToolDependency(org: String, id: String, version: String): ModuleID =
     ModuleID(org, id, version, Some(Configurations.ScalaTool.name + "->default,optional(default)"))
 }
@@ -37,7 +45,7 @@ final case class IvyScala(scalaFullVersion: String, scalaBinaryVersion: String, 
 
 private object IvyScala {
   /** Performs checks/adds filters on Scala dependencies (if enabled in IvyScala). */
-  def checkModule(module: DefaultModuleDescriptor, conf: String, log: Logger)(check: IvyScala) {
+  def checkModule(module: DefaultModuleDescriptor, conf: String, log: Logger)(check: IvyScala): Unit = {
     if (check.checkExplicit)
       checkDependencies(module, check.scalaBinaryVersion, check.configurations, log)
     if (check.filterImplicit)
@@ -45,12 +53,12 @@ private object IvyScala {
     if (check.overrideScalaVersion)
       overrideScalaVersion(module, check.scalaFullVersion)
   }
-  def overrideScalaVersion(module: DefaultModuleDescriptor, version: String) {
+  def overrideScalaVersion(module: DefaultModuleDescriptor, version: String): Unit = {
     overrideVersion(module, Organization, LibraryID, version)
     overrideVersion(module, Organization, CompilerID, version)
     overrideVersion(module, Organization, ReflectID, version)
   }
-  def overrideVersion(module: DefaultModuleDescriptor, org: String, name: String, version: String) {
+  def overrideVersion(module: DefaultModuleDescriptor, org: String, name: String, version: String): Unit = {
     val id = new ModuleId(org, name)
     val over = new OverrideDependencyDescriptorMediator(null, version)
     module.addDependencyDescriptorMediator(id, ExactPatternMatcher.INSTANCE, over)
@@ -60,13 +68,18 @@ private object IvyScala {
    * Checks the immediate dependencies of module for dependencies on scala jars and verifies that the version on the
    * dependencies matches scalaVersion.
    */
-  private def checkDependencies(module: ModuleDescriptor, scalaBinaryVersion: String, configurations: Iterable[Configuration], log: Logger) {
+  private def checkDependencies(module: ModuleDescriptor, scalaBinaryVersion: String, configurations: Iterable[Configuration], log: Logger): Unit = {
     val configSet = if (configurations.isEmpty) (c: String) => true else configurationSet(configurations)
     def binaryScalaWarning(dep: DependencyDescriptor): Option[String] =
       {
         val id = dep.getDependencyRevisionId
         val depBinaryVersion = CrossVersion.binaryScalaVersion(id.getRevision)
-        val mismatched = id.getOrganisation == Organization && depBinaryVersion != scalaBinaryVersion && dep.getModuleConfigurations.exists(configSet)
+        def isScalaLangOrg = id.getOrganisation == Organization
+        def isNotScalaActorsMigration = !(id.getName startsWith "scala-actors-migration") // Exception to the rule: sbt/sbt#1818
+        def isNotScalaPickling = !(id.getName startsWith "scala-pickling") // Exception to the rule: sbt/sbt#1899
+        def hasBinVerMismatch = depBinaryVersion != scalaBinaryVersion
+        def matchesOneOfTheConfigs = dep.getModuleConfigurations.exists(configSet)
+        val mismatched = isScalaLangOrg && isNotScalaActorsMigration && isNotScalaPickling && hasBinVerMismatch && matchesOneOfTheConfigs
         if (mismatched)
           Some("Binary version (" + depBinaryVersion + ") for dependency " + id +
             "\n\tin " + module.getModuleRevisionId +
@@ -83,7 +96,7 @@ private object IvyScala {
    * done because these jars are provided by the ScalaInstance of the project.  The version of Scala to use
    * is done by setting scalaVersion in the project definition.
    */
-  private def excludeScalaJars(module: DefaultModuleDescriptor, configurations: Iterable[Configuration]) {
+  private def excludeScalaJars(module: DefaultModuleDescriptor, configurations: Iterable[Configuration]): Unit = {
     val configurationNames =
       {
         val names = module.getConfigurationsNames

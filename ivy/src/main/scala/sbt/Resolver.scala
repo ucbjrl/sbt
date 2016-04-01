@@ -15,10 +15,40 @@ sealed trait Resolver {
 final class RawRepository(val resolver: DependencyResolver) extends Resolver {
   def name = resolver.getName
   override def toString = "Raw(" + resolver.toString + ")"
+
+  override def equals(o: Any): Boolean = o match {
+    case o: RawRepository =>
+      this.name == o.name
+    case _ => false
+  }
+
+  override def hashCode: Int =
+    {
+      var hash = 1
+      hash = hash * 31 + this.name.##
+      hash
+    }
 }
 sealed case class ChainedResolver(name: String, resolvers: Seq[Resolver]) extends Resolver
+
+/** An instance of a remote maven repository.  Note:  This will use Aether/Maven to resolve artifacts. */
 sealed case class MavenRepository(name: String, root: String) extends Resolver {
-  override def toString = name + ": " + root
+  override def toString = s"$name: $root"
+  def isCache: Boolean = false
+  def localIfFile: Boolean = true
+  def withLocalIfFile(value: Boolean) = new MavenRepository(name, root) { override def localIfFile = value }
+}
+
+/**
+ * An instance of maven CACHE directory.  You cannot treat a cache directory the same as a a remote repository because
+ * the metadata is different (see Aether ML discussion).
+ */
+final class MavenCache(name: String, val rootFile: File) extends MavenRepository(name, rootFile.toURI.toURL.toString) {
+  override val toString = s"cache:$name: ${rootFile.getAbsolutePath}"
+  override def isCache: Boolean = true
+}
+object MavenCache {
+  def apply(name: String, rootFile: File): MavenCache = new MavenCache(name, rootFile)
 }
 
 final class Patterns(val ivyPatterns: Seq[String], val artifactPatterns: Seq[String], val isMavenCompatible: Boolean, val descriptorOptional: Boolean, val skipConsistencyCheck: Boolean) {
@@ -181,20 +211,48 @@ object Resolver {
   def sbtPluginRepo(status: String) = url("sbt-plugin-" + status, new URL(SbtPluginRepositoryRoot + "/sbt-plugin-" + status + "/"))(ivyStylePatterns)
   def sonatypeRepo(status: String) = new MavenRepository("sonatype-" + status, SonatypeRepositoryRoot + "/" + status)
   def bintrayRepo(owner: String, repo: String) = new MavenRepository(s"bintray-$owner-$repo", s"https://dl.bintray.com/$owner/$repo/")
+  def bintrayIvyRepo(owner: String, repo: String) = url(s"bintray-$owner-$repo", new URL(s"https://dl.bintray.com/$owner/$repo/"))(Resolver.ivyStylePatterns)
   def jcenterRepo = JCenterRepository
 
   /** Add the local and Maven Central repositories to the user repositories.  */
   def withDefaultResolvers(userResolvers: Seq[Resolver]): Seq[Resolver] =
-    withDefaultResolvers(userResolvers, true)
+    withDefaultResolvers(userResolvers, false, true)
   /**
    * Add the local Ivy repository to the user repositories.
    * If `mavenCentral` is true, add the Maven Central repository.
    */
   def withDefaultResolvers(userResolvers: Seq[Resolver], mavenCentral: Boolean): Seq[Resolver] =
+    withDefaultResolvers(userResolvers, false, mavenCentral)
+  /**
+   * Add the local Ivy repository to the user repositories.
+   * If `jcenter` is true, add the JCenter.
+   * If `mavenCentral` is true, add the Maven Central repository.
+   */
+  private[sbt] def withDefaultResolvers(userResolvers: Seq[Resolver], jcenter: Boolean, mavenCentral: Boolean): Seq[Resolver] =
     Seq(Resolver.defaultLocal) ++
       userResolvers ++
+      single(JCenterRepository, jcenter) ++
       single(DefaultMavenRepository, mavenCentral)
   private def single[T](value: T, nonEmpty: Boolean): Seq[T] = if (nonEmpty) Seq(value) else Nil
+
+  /**
+   * Reorganize the built-in resolvers that is configured for this application by the sbt launcher.
+   * If `jcenter` is true, add the JCenter.
+   * If `mavenCentral` is true, add the Maven Central repository.
+   */
+  private[sbt] def reorganizeAppResolvers(appResolvers: Seq[Resolver], jcenter: Boolean, mavenCentral: Boolean): Seq[Resolver] =
+    appResolvers.partition(_ == Resolver.defaultLocal) match {
+      case (locals, xs) =>
+        locals ++
+        (xs.partition(_ == JCenterRepository) match {
+          case (jc, xs) =>
+            single(JCenterRepository, jcenter) ++
+            (xs.partition(_ == DefaultMavenRepository) match {
+              case (m, xs) =>
+                single(DefaultMavenRepository, mavenCentral) ++ xs // TODO - Do we need to filter out duplicates?
+            })
+        })
+    }
 
   /** A base class for defining factories for interfaces to Ivy repositories that require a hostname , port, and patterns.  */
   sealed abstract class Define[RepositoryType <: SshBasedRepository] extends NotNull {
@@ -321,8 +379,9 @@ object Resolver {
       loadHomeFromSettings(() => new File(new File(System.getenv("M2_HOME")), "conf/settings.xml")) getOrElse
       new File(Path.userHome, ".m2/repository")
   }
-  def publishMavenLocal = Resolver.file("publish-m2-local", mavenLocalDir)
-  def mavenLocal = MavenRepository("Maven2 Local", mavenLocalDir.toURI.toString)
+  // TODO - should this just be the *exact* same as mavenLocal?  probably...
+  def publishMavenLocal: MavenCache = new MavenCache("publish-m2-local", mavenLocalDir)
+  def mavenLocal: MavenRepository = new MavenCache("Maven2 Local", mavenLocalDir)
   def defaultLocal = defaultUserFileRepository("local")
   def defaultShared = defaultUserFileRepository("shared")
   def defaultUserFileRepository(id: String) =

@@ -3,12 +3,14 @@
  */
 package sbt
 
-import java.io.File
+import java.io.{ File, IOException }
 import CacheIO.{ fromFile, toFile }
 import sbinary.Format
+import scala.pickling.PicklingException
 import scala.reflect.Manifest
 import scala.collection.mutable
 import IO.{ delete, read, write }
+import sbt.serialization._
 
 object Tracked {
   /**
@@ -36,10 +38,35 @@ object Tracked {
       toFile(next)(cacheFile)
       next
     }
-
+  // Todo: This function needs more testing.
+  private[sbt] def lastOutputWithJson[I, O: Pickler: Unpickler](cacheFile: File)(f: (I, Option[O]) => O): I => O = in =>
+    {
+      val previous: Option[O] = try {
+        fromJsonFile[O](cacheFile).toOption
+      } catch {
+        case e: PicklingException => None
+        case e: IOException       => None
+      }
+      val next = f(in, previous)
+      IO.createDirectory(cacheFile.getParentFile)
+      toJsonFile(next, cacheFile)
+      next
+    }
   def inputChanged[I, O](cacheFile: File)(f: (Boolean, I) => O)(implicit ic: InputCache[I]): I => O = in =>
     {
       val help = new CacheHelp(ic)
+      val conv = help.convert(in)
+      val changed = help.changed(cacheFile, conv)
+      val result = f(changed, in)
+
+      if (changed)
+        help.save(cacheFile, conv)
+
+      result
+    }
+  private[sbt] def inputChangedWithJson[I: Pickler: Unpickler, O](cacheFile: File)(f: (Boolean, I) => O): I => O = in =>
+    {
+      val help = new JsonCacheHelp[I]
       val conv = help.convert(in)
       val changed = help.changed(cacheFile, conv)
       val result = f(changed, in)
@@ -61,6 +88,18 @@ object Tracked {
 
       result
     }
+  private[sbt] def outputChangedWithJson[I: Pickler, O](cacheFile: File)(f: (Boolean, I) => O): (() => I) => O = in =>
+    {
+      val initial = in()
+      val help = new JsonCacheHelp[I]
+      val changed = help.changed(cacheFile, help.convert(initial))
+      val result = f(changed, initial)
+
+      if (changed)
+        help.save(cacheFile, help.convert(in()))
+
+      result
+    }
   final class CacheHelp[I](val ic: InputCache[I]) {
     def convert(i: I): ic.Internal = ic.convert(i)
     def save(cacheFile: File, value: ic.Internal): Unit =
@@ -69,6 +108,16 @@ object Tracked {
       try {
         val prev = Using.fileInputStream(cacheFile)(x => ic.read(x))
         !ic.equiv.equiv(converted, prev)
+      } catch { case e: Exception => true }
+  }
+  private[sbt] final class JsonCacheHelp[I: Pickler] {
+    def convert(i: I): String = toJsonString(i)
+    def save(cacheFile: File, value: String): Unit =
+      IO.write(cacheFile, value, IO.utf8)
+    def changed(cacheFile: File, converted: String): Boolean =
+      try {
+        val prev = IO.read(cacheFile, IO.utf8)
+        converted != prev
       } catch { case e: Exception => true }
   }
 }
@@ -182,6 +231,24 @@ class Difference(val cache: File, val style: FilesInfo.Style, val defineClean: B
 object FileFunction {
   type UpdateFunction = (ChangeReport[File], ChangeReport[File]) => Set[File]
 
+  /**
+    Generic change-detection helper used to help build / artifact generation /
+    etc. steps detect whether or not they need to run. Returns a function whose
+    input is a Set of input files, and subsequently executes the action function
+    (which does the actual work: compiles, generates resources, etc.), returning
+    a Set of output files that it generated.
+
+    The input file and resulting output file state is cached in
+    cacheBaseDirectory. On each invocation, the state of the input and output
+    files from the previous run is compared against the cache, as is the set of
+    input files. If a change in file state / input files set is detected, the
+    action function is re-executed.
+
+    @param cacheBaseDirectory The folder in which to store
+    @param inStyle The strategy by which to detect state change in the input files from the previous run
+    @param outStyle The strategy by which to detect state change in the output files from the previous run
+    @param action The work function, which receives a list of input files and returns a list of output files
+    */
   def cached(cacheBaseDirectory: File, inStyle: FilesInfo.Style = FilesInfo.lastModified, outStyle: FilesInfo.Style = FilesInfo.exists)(action: Set[File] => Set[File]): Set[File] => Set[File] =
     cached(cacheBaseDirectory)(inStyle, outStyle)((in, out) => action(in.checked))
 

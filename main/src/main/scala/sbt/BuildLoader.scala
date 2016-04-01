@@ -10,15 +10,15 @@ import Alternatives._
 import Types.{ const, idFun }
 
 final class MultiHandler[S, T](builtIn: S => Option[T], root: Option[S => Option[T]], nonRoots: List[(URI, S => Option[T])], getURI: S => URI, log: S => Logger) {
-  def applyFun: S => Option[T] = apply _
+  def applyFun: S => Option[T] = apply
   def apply(info: S): Option[T] =
     (baseLoader(info), applyNonRoots(info)) match {
       case (None, Nil) => None
       case (None, xs @ (_, nr) :: ignored) =>
-        if (!ignored.isEmpty) warn("Using first of multiple matching non-root build resolvers for " + getURI(info), log(info), xs)
+        if (ignored.nonEmpty) warn("Using first of multiple matching non-root build resolvers for " + getURI(info), log(info), xs)
         Some(nr)
       case (Some(b), xs) =>
-        if (!xs.isEmpty) warn("Ignoring shadowed non-root build resolver(s) for " + getURI(info), log(info), xs)
+        if (xs.nonEmpty) warn("Ignoring shadowed non-root build resolver(s) for " + getURI(info), log(info), xs)
         Some(b)
     }
 
@@ -29,7 +29,7 @@ final class MultiHandler[S, T](builtIn: S => Option[T], root: Option[S => Option
   def applyNonRoots(info: S): List[(URI, T)] =
     nonRoots flatMap { case (definingURI, loader) => loader(info) map { unit => (definingURI, unit) } }
 
-  private[this] def warn(baseMessage: String, log: Logger, matching: Seq[(URI, T)]) {
+  private[this] def warn(baseMessage: String, log: Logger, matching: Seq[(URI, T)]): Unit = {
     log.warn(baseMessage)
     log.debug("Non-root build resolvers defined in:")
     log.debug(matching.map(_._1).mkString("\n\t"))

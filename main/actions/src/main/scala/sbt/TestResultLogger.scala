@@ -112,7 +112,7 @@ object TestResultLogger {
     val printStandard_? : Output => Boolean =
       results =>
         // Print the standard one-liner statistic if no framework summary is defined, or when > 1 framework is in used.
-        results.summaries.size > 1 || results.summaries.headOption.forall(_.summaryText.size == 0)
+        results.summaries.size > 1 || results.summaries.headOption.forall(_.summaryText.isEmpty)
 
     val printStandard = TestResultLogger((log, results, _) => {
       val (skippedCount, errorsCount, passedCount, failuresCount, ignoredCount, canceledCount, pendingCount) =
@@ -142,7 +142,7 @@ object TestResultLogger {
       }
 
       def show(label: String, level: Level.Value, tests: Iterable[String]): Unit =
-        if (!tests.isEmpty) {
+        if (tests.nonEmpty) {
           log.log(level, label)
           log.log(level, tests.mkString("\t", "\n\t", ""))
         }

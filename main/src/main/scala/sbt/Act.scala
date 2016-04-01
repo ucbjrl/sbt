@@ -48,12 +48,22 @@ object Act {
           new ParsedKey(makeScopedKey(proj, conf, task, extra, key), mask)
         }
 
-      for {
-        rawProject <- optProjectRef(index, current)
-        proj = resolveProject(rawProject, current)
-        confAmb <- config(index configs proj)
-        partialMask = ScopeMask(rawProject.isExplicit, confAmb.isExplicit, false, false)
-      } yield taskKeyExtra(proj, confAmb, partialMask)
+      val projectKeys =
+        for {
+          rawProject <- optProjectRef(index, current)
+          proj = resolveProject(rawProject, current)
+          confAmb <- config(index configs proj)
+          partialMask = ScopeMask(rawProject.isExplicit, confAmb.isExplicit, false, false)
+        } yield taskKeyExtra(proj, confAmb, partialMask)
+
+      val build = Some(BuildRef(current.build))
+      val buildKeys =
+        for {
+          confAmb <- config(index configs build)
+          partialMask = ScopeMask(false, confAmb.isExplicit, false, false)
+        } yield taskKeyExtra(build, confAmb, partialMask)
+
+      buildKeys combinedWith projectKeys map (_.flatten)
     }
   def makeScopedKey(proj: Option[ResolvedReference], conf: Option[String], task: Option[AttributeKey[_]], extra: ScopeAxis[AttributeMap], key: AttributeKey[_]): ScopedKey[_] =
     ScopedKey(Scope(toAxis(proj, Global), toAxis(conf map ConfigKey.apply, Global), toAxis(task, Global), extra), key)
@@ -172,7 +182,7 @@ object Act {
 
   def extrasParser(knownKeys: Map[String, AttributeKey[_]], knownValues: IMap[AttributeKey, Set]): Parser[AttributeMap] =
     {
-      val validKeys = knownKeys.filter { case (_, key) => knownValues get key exists (!_.isEmpty) }
+      val validKeys = knownKeys.filter { case (_, key) => knownValues get key exists (_.nonEmpty) }
       if (validKeys.isEmpty)
         failure("No valid extra keys.")
       else

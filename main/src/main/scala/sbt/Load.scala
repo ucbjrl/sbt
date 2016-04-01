@@ -71,10 +71,20 @@ object Load {
         if (files.isEmpty || base == globalBase) const(Nil) else buildGlobalSettings(globalBase, files, config)
       config.copy(injectSettings = config.injectSettings.copy(projectLoaded = compiled))
     }
+  // We are hiding a bug fix on global setting that was not importing auto imports.
+  // Because fixing this via https://github.com/sbt/sbt/pull/2399
+  // breaks the source compatibility: https://github.com/sbt/sbt/issues/2415
+  @deprecated("Remove this when we can break source compatibility.", "0.13.10")
+  private[sbt] def useAutoImportInGlobal = sys.props.get("sbt.global.autoimport") map { _.toLowerCase == "true" } getOrElse false
   def buildGlobalSettings(base: File, files: Seq[File], config: sbt.LoadBuildConfiguration): ClassLoader => Seq[Setting[_]] =
     {
       val eval = mkEval(data(config.globalPluginClasspath), base, defaultEvalOptions)
-      val imports = BuildUtil.baseImports ++ BuildUtil.importAllRoot(config.globalPluginNames)
+
+      val imports = BuildUtil.baseImports ++
+        (// when we can beak the source compat, remove this if and use config.detectedGlobalPlugins.imports
+        if (useAutoImportInGlobal) config.detectedGlobalPlugins.imports
+        else BuildUtil.importAllRoot(config.globalPluginNames))
+
       loader => {
         val loaded = EvaluateConfigurations(eval, files, imports)(loader)
         // TODO - We have a potential leak of config-classes in the global directory right now.
@@ -133,7 +143,7 @@ object Load {
       val settings = finalTransforms(buildConfigurations(loaded, getRootProject(projects), config.injectSettings))
       val delegates = config.delegates(loaded)
       val data = Def.make(settings)(delegates, config.scopeLocal, Project.showLoadingKey(loaded))
-      Project.checkTargets(data) foreach error
+      Project.checkTargets(data) foreach sys.error
       val index = structureIndex(data, settings, loaded.extra(data), projects)
       val streams = mkStreams(projects, loaded.root, data)
       (rootEval, new sbt.BuildStructure(projects, loaded.root, settings, data, index, streams, delegates, config.scopeLocal))
@@ -174,7 +184,7 @@ object Load {
       val keys = Index.allKeys(settings)
       val attributeKeys = Index.attributeKeys(data) ++ keys.map(_.key)
       val scopedKeys = keys ++ data.allKeys((s, k) => ScopedKey(s, k))
-      val projectsMap = projects.mapValues(_.defined.keySet).toMap
+      val projectsMap = projects.mapValues(_.defined.keySet)
       val keyIndex = KeyIndex(scopedKeys, projectsMap)
       val aggIndex = KeyIndex.aggregate(scopedKeys, extra(keyIndex), projectsMap)
       new sbt.StructureIndex(Index.stringToKeyMap(attributeKeys), Index.taskToKeyMap(data), Index.triggers(data), keyIndex, aggIndex)
@@ -184,7 +194,7 @@ object Load {
   def reapply(newSettings: Seq[Setting[_]], structure: sbt.BuildStructure)(implicit display: Show[ScopedKey[_]]): sbt.BuildStructure =
     {
       val transformed = finalTransforms(newSettings)
-      val newData = makeSettings(transformed, structure.delegates, structure.scopeLocal)
+      val newData = Def.make(transformed)(structure.delegates, structure.scopeLocal, display)
       val newIndex = structureIndex(newData, transformed, index => BuildUtil(structure.root, structure.units, index, newData), structure.units)
       val newStreams = mkStreams(structure.units, structure.root, newData)
       new sbt.BuildStructure(units = structure.units, root = structure.root, settings = transformed, data = newData, index = newIndex, streams = newStreams, delegates = structure.delegates, scopeLocal = structure.scopeLocal)
@@ -256,12 +266,12 @@ object Load {
     // the files aren't properly returned, even though they should be.
     // TODO - figure out where the caching of whether or not to generate classfiles occurs, and
     // put cleanups there, perhaps.
-    if (!keepSet.isEmpty) {
+    if (keepSet.nonEmpty) {
       def keepFile(f: File) = keepSet(f.getCanonicalPath)
       import Path._
       val existing = (baseTarget.***.get).filterNot(_.isDirectory)
       val toDelete = existing.filterNot(keepFile)
-      if (!toDelete.isEmpty) {
+      if (toDelete.nonEmpty) {
         IO.delete(toDelete)
       }
     }
@@ -340,12 +350,12 @@ object Load {
         }
       case Nil => (references, builds, loaders)
     }
-  def checkProjectBase(buildBase: File, projectBase: File) {
+  def checkProjectBase(buildBase: File, projectBase: File): Unit = {
     checkDirectory(projectBase)
     assert(buildBase == projectBase || IO.relativize(buildBase, projectBase).isDefined, "Directory " + projectBase + " is not contained in build root " + buildBase)
   }
   def checkBuildBase(base: File) = checkDirectory(base)
-  def checkDirectory(base: File) {
+  def checkDirectory(base: File): Unit = {
     assert(base.isAbsolute, "Not absolute: " + base)
     if (base.isFile)
       sys.error("Not a directory: " + base)
@@ -358,9 +368,9 @@ object Load {
       builds map {
         case (uri, unit) =>
           (uri, unit.resolveRefs(ref => Scope.resolveProjectRef(uri, rootProject, ref)))
-      } toMap;
+      }
     }
-  def checkAll(referenced: Map[URI, List[ProjectReference]], builds: Map[URI, sbt.PartBuildUnit]) {
+  def checkAll(referenced: Map[URI, List[ProjectReference]], builds: Map[URI, sbt.PartBuildUnit]): Unit = {
     val rootProject = getRootProject(builds)
     for ((uri, refs) <- referenced; ref <- refs) {
       val ProjectRef(refURI, refID) = Scope.resolveProjectRef(uri, rootProject, ref)
@@ -396,7 +406,7 @@ object Load {
     {
       IO.assertAbsolute(uri)
       val resolve = (_: Project).resolve(ref => Scope.resolveProjectRef(uri, rootProject, ref))
-      new sbt.LoadedBuildUnit(unit.unit, unit.defined mapValues resolve toMap, unit.rootProjects, unit.buildSettings)
+      new sbt.LoadedBuildUnit(unit.unit, unit.defined mapValues resolve, unit.rootProjects, unit.buildSettings)
     }
   def projects(unit: sbt.BuildUnit): Seq[Project] =
     {
@@ -585,7 +595,9 @@ object Load {
               val existingIds = otherProjects.projects map (_.id)
               val refs = existingIds map (id => ProjectRef(buildUri, id))
               val defaultID = autoID(buildBase, context, existingIds)
-              val root = finalizeProject(Build.defaultAggregatedProject(defaultID, buildBase, refs), files)
+              val root0 = if (discovered.isEmpty || java.lang.Boolean.getBoolean("sbt.root.ivyplugin")) Build.defaultAggregatedProject(defaultID, buildBase, refs)
+              else Build.generatedRootWithoutIvyPlugin(defaultID, buildBase, refs)
+              val root = finalizeProject(root0, files)
               val result = root +: (acc ++ otherProjects.projects)
               log.debug(s"[Loading] Done in ${buildBase}, returning: ${result.map(_.id).mkString("(", ", ", ")")}")
               LoadedProjects(result, generated ++ otherGenerated ++ generatedConfigClassFiles)
@@ -645,7 +657,7 @@ object Load {
       }
     // 2. Discover all the autoplugins and contributed configurations.
     val autoPlugins =
-      try loadedPlugins.detected.deducePlugins(transformedProject.plugins, log)
+      try loadedPlugins.detected.deducePluginsFromProject(transformedProject, log)
       catch { case e: AutoPluginException => throw translateAutoPluginException(e, transformedProject) }
     val autoConfigs = autoPlugins.flatMap(_.projectConfigurations)
 
@@ -699,10 +711,13 @@ object Load {
     loadedPlugins: sbt.LoadedPlugins,
     eval: () => Eval,
     memoSettings: mutable.Map[File, LoadedSbtFile]): DiscoveredProjects = {
+
     // Default sbt files to read, if needed
     lazy val defaultSbtFiles = configurationSources(projectBase)
+
     // Classloader of the build
     val loader = loadedPlugins.loader
+
     // How to load an individual file for use later.
     // TODO - We should import vals defined in other sbt files here, if we wish to
     // share.  For now, build.sbt files have their own unique namespace.
@@ -711,11 +726,13 @@ object Load {
     // How to merge SbtFiles we read into one thing
     def merge(ls: Seq[LoadedSbtFile]): LoadedSbtFile = (LoadedSbtFile.empty /: ls) { _ merge _ }
     // Loads a given file, or pulls from the cache.
-    def memoLoadSettingsFile(src: File): LoadedSbtFile = memoSettings.get(src) getOrElse {
+
+    def memoLoadSettingsFile(src: File): LoadedSbtFile = memoSettings.getOrElse(src, {
       val lf = loadSettingsFile(src)
       memoSettings.put(src, lf.clearProjects) // don't load projects twice
       lf
-    }
+    })
+
     // Loads a set of sbt files, sorted by their lexical name (current behavior of sbt).
     def loadFiles(fs: Seq[File]): LoadedSbtFile =
       merge(fs.sortBy(_.getName).map(memoLoadSettingsFile))
@@ -777,7 +794,7 @@ object Load {
   def hasDefinition(dir: File) =
     {
       import Path._
-      !(dir * -GlobFilter(DefaultTargetName)).get.isEmpty
+      (dir * -GlobFilter(DefaultTargetName)).get.nonEmpty
     }
   def noPlugins(dir: File, config: sbt.LoadBuildConfiguration): sbt.LoadedPlugins =
     loadPluginDefinition(dir, config, PluginData(config.globalPluginClasspath, None, None))
@@ -952,6 +969,19 @@ final case class LoadBuildConfiguration(
     log: Logger) {
   lazy val (globalPluginClasspath, globalPluginLoader) = Load.pluginDefinitionLoader(this, Load.globalPluginClasspath(globalPlugin))
   lazy val globalPluginNames = if (globalPluginClasspath.isEmpty) Nil else Load.getPluginNames(globalPluginClasspath, globalPluginLoader)
+
+  private[sbt] lazy val globalPluginDefs = {
+    val pluginData = globalPlugin match {
+      case Some(x) => PluginData(x.data.fullClasspath, x.data.internalClasspath, Some(x.data.resolvers), Some(x.data.updateReport), Nil)
+      case None    => PluginData(globalPluginClasspath, Nil, None, None, Nil)
+    }
+    val baseDir = globalPlugin match {
+      case Some(x) => x.base
+      case _       => stagingDirectory
+    }
+    Load.loadPluginDefinition(baseDir, this, pluginData)
+  }
+  lazy val detectedGlobalPlugins = globalPluginDefs.detected
 }
 
 final class IncompatiblePluginsException(msg: String, cause: Throwable) extends Exception(msg, cause)

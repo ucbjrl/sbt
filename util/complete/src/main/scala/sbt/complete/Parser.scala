@@ -126,6 +126,9 @@ sealed trait RichParser[A] {
 
   /** Applies the original parser, applies `f` to the result to get the next parser, and applies that parser and uses its result for the overall result. */
   def flatMap[B](f: A => Parser[B]): Parser[B]
+
+  /** Applied both the original parser and `b` on the same input and returns the results produced by each parser */
+  def combinedWith(b: Parser[A]): Parser[Seq[A]]
 }
 
 /** Contains Parser implementation helper methods not typically needed for using parsers. */
@@ -185,9 +188,9 @@ object Parser extends ParserMain {
   def mkFailure(error: => String, definitive: Boolean = false): Failure = new Failure(error :: Nil, definitive)
 
   @deprecated("This method is deprecated and will be removed in the next major version. Use the parser directly to check for invalid completions.", since = "0.13.2")
-  def checkMatches(a: Parser[_], completions: Seq[String]) {
+  def checkMatches(a: Parser[_], completions: Seq[String]): Unit = {
     val bad = completions.filter(apply(a)(_).resultEmpty.isFailure)
-    if (!bad.isEmpty) sys.error("Invalid example completions: " + bad.mkString("'", "', '", "'"))
+    if (bad.nonEmpty) sys.error("Invalid example completions: " + bad.mkString("'", "', '", "'"))
   }
 
   def tuple[A, B](a: Option[A], b: Option[B]): Option[(A, B)] =
@@ -309,6 +312,11 @@ trait ParserMain {
     def filter(f: A => Boolean, msg: String => String): Parser[A] = filterParser(a, f, "", msg)
     def string(implicit ev: A <:< Seq[Char]): Parser[String] = map(_.mkString)
     def flatMap[B](f: A => Parser[B]) = bindParser(a, f)
+    def combinedWith(b: Parser[A]): Parser[Seq[A]] =
+      if (a.valid)
+        if (b.valid) new CombiningParser(a, b) else a.map(Seq(_))
+      else
+        b.map(Seq(_))
   }
 
   implicit def literalRichCharParser(c: Char): RichParser[Char] = richParser(c)
@@ -378,7 +386,7 @@ trait ParserMain {
     def unapply[A, B](t: (A, B)): Some[(A, B)] = Some(t)
   }
 
-  /** Parses input `str` using `parser`.  If successful, the result is provided wrapped in `Right`.  If unsuccesful, an error message is provided in `Left`.*/
+  /** Parses input `str` using `parser`.  If successful, the result is provided wrapped in `Right`.  If unsuccessful, an error message is provided in `Left`.*/
   def parse[T](str: String, parser: Parser[T]): Either[String, T] =
     Parser.result(parser, str).left.map { failures =>
       val (msgs, pos) = failures()
@@ -480,7 +488,7 @@ trait ParserMain {
 
   def matched(t: Parser[_], seen: Vector[Char] = Vector.empty, partial: Boolean = false): Parser[String] =
     t match {
-      case i: Invalid => if (partial && !seen.isEmpty) success(seen.mkString) else i
+      case i: Invalid => if (partial && seen.nonEmpty) success(seen.mkString) else i
       case _ =>
         if (t.result.isEmpty)
           new MatchedString(t, seen, partial)
@@ -633,8 +641,26 @@ private final class HetParser[A, B](a: Parser[A], b: Parser[B]) extends ValidPar
   def completions(level: Int) = a.completions(level) ++ b.completions(level)
   override def toString = "(" + a + " || " + b + ")"
 }
+private final class CombiningParser[T](a: Parser[T], b: Parser[T]) extends ValidParser[Seq[T]] {
+  lazy val result: Option[Seq[T]] = (a.result.toSeq ++ b.result.toSeq) match { case Seq() => None; case seq => Some(seq) }
+  def completions(level: Int) = a.completions(level) ++ b.completions(level)
+  def derive(i: Char) =
+    (a.valid, b.valid) match {
+      case (true, true)   => new CombiningParser(a derive i, b derive i)
+      case (true, false)  => a derive i map (Seq(_))
+      case (false, true)  => b derive i map (Seq(_))
+      case (false, false) => new Invalid(mkFailure("No valid parser available."))
+    }
+  def resultEmpty =
+    (a.resultEmpty, b.resultEmpty) match {
+      case (Value(ra), Value(rb)) => Value(Seq(ra, rb))
+      case (Value(ra), _)         => Value(Seq(ra))
+      case (_, Value(rb))         => Value(Seq(rb))
+      case _                      => Value(Nil)
+    }
+}
 private final class ParserSeq[T](a: Seq[Parser[T]], errors: => Seq[String]) extends ValidParser[Seq[T]] {
-  assert(!a.isEmpty)
+  assert(a.nonEmpty)
   lazy val resultEmpty: Result[Seq[T]] =
     {
       val res = a.map(_.resultEmpty)

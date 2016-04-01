@@ -4,7 +4,7 @@
 [app]
   org: ${sbt.organization-org.scala-sbt}
   name: sbt
-  version: ${sbt.version-read(sbt.version)[0.13.7]}
+  version: ${sbt.version-read(sbt.version)[0.13.11]}
   class: sbt.ScriptMain
   components: xsbti,extra
   cross-versioned: ${sbt.cross.versioned-false}
@@ -12,8 +12,9 @@
 
 [repositories]
   local
-  typesafe-ivy-releases: https://repo.typesafe.com/typesafe/ivy-releases/, [organization]/[module]/[revision]/[type]s/[artifact](-[classifier]).[ext], bootOnly
   maven-central
+  typesafe-ivy-releases: https://repo.typesafe.com/typesafe/ivy-releases/, [organization]/[module]/[revision]/[type]s/[artifact](-[classifier]).[ext], bootOnly
+  sbt-ivy-snapshots: https://repo.scala-sbt.org/scalasbt/ivy-snapshots/, [organization]/[module]/[revision]/[type]s/[artifact](-[classifier]).[ext], bootOnly
 
 [boot]
   directory: ${sbt.boot.directory-${sbt.global.base-${user.home}/.sbt}/boot/}

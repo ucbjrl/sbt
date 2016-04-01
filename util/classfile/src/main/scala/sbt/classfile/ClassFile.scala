@@ -10,7 +10,6 @@ import java.io.File
 private[sbt] trait ClassFile {
   val majorVersion: Int
   val minorVersion: Int
-  val fileName: String
   val className: String
   val superClassName: String
   val interfaceNames: Array[String]
@@ -22,6 +21,29 @@ private[sbt] trait ClassFile {
   val sourceFile: Option[String]
   def types: Set[String]
   def stringValue(a: AttributeInfo): String
+
+  /**
+   * If the given fieldName represents a ConstantValue field, parses its representation from
+   * the constant pool and returns it.
+   */
+  def constantValue(fieldName: String): Option[AnyRef] =
+    this.fields.find(_.name.exists(_ == fieldName)).toSeq.flatMap(_.attributes).collectFirst {
+      case ai @ classfile.AttributeInfo(Some("ConstantValue"), _) =>
+        constantPool(Parser.entryIndex(ai))
+    }.map {
+      case Constant(ConstantString, nextOffset, _, _) =>
+        // follow the indirection from ConstantString to ConstantUTF8
+        val nextConstant = constantPool(nextOffset)
+        nextConstant.value.getOrElse {
+          throw new IllegalStateException(s"Empty UTF8 value in constant pool: $nextConstant")
+        }
+      case constant @ Constant((ConstantFloat | ConstantLong | ConstantDouble | ConstantInteger), _, _, ref) =>
+        ref.getOrElse {
+          throw new IllegalStateException(s"Empty primitive value in constant pool: $constant")
+        }
+      case constant =>
+        throw new IllegalStateException(s"Unsupported ConstantValue type: $constant")
+    }
 }
 
 private[sbt] final case class Constant(tag: Byte, nameIndex: Int, typeIndex: Int, value: Option[AnyRef]) extends NotNull {
@@ -33,10 +55,10 @@ private[sbt] final case class Constant(tag: Byte, nameIndex: Int, typeIndex: Int
 private[sbt] final case class FieldOrMethodInfo(accessFlags: Int, name: Option[String], descriptor: Option[String], attributes: IndexedSeq[AttributeInfo]) extends NotNull {
   def isStatic = (accessFlags & ACC_STATIC) == ACC_STATIC
   def isPublic = (accessFlags & ACC_PUBLIC) == ACC_PUBLIC
-  def isMain = isPublic && isStatic && descriptor.filter(_ == "([Ljava/lang/String;)V").isDefined
+  def isMain = isPublic && isStatic && descriptor.exists(_ == "([Ljava/lang/String;)V")
 }
 private[sbt] final case class AttributeInfo(name: Option[String], value: Array[Byte]) extends NotNull {
-  def isNamed(s: String) = name.filter(s == _).isDefined
+  def isNamed(s: String) = name.exists(s == _)
   def isSignature = isNamed("Signature")
   def isSourceFile = isNamed("SourceFile")
 }

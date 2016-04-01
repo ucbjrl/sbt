@@ -10,7 +10,36 @@ import xsbti.api.{ Compilation, Source }
 import xsbti.compile.DependencyChanges
 import java.io.File
 
+/**
+ * Helper class to run incremental compilation algorithm.
+ *
+ *
+ * This class delegates down to
+ * - IncrementalNameHashing
+ * - IncrementalDefault
+ * - IncrementalAnyStyle
+ */
 object Incremental {
+  class PrefixingLogger(val prefix: String)(orig: Logger) extends Logger {
+    def trace(t: => Throwable): Unit = orig.trace(t)
+    def success(message: => String): Unit = orig.success(message)
+    def log(level: sbt.Level.Value, message: => String): Unit = orig.log(level, message.replaceAll("(?m)^", prefix))
+  }
+
+  /**
+   * Runs the incremental compiler algorithm.
+   *
+   * @param sources   The sources to compile
+   * @param entry  The means of looking up a class on the classpath.
+   * @param previous The previously detected source dependencies.
+   * @param current  A mechanism for generating stamps (timestamps, hashes, etc).
+   * @param doCompile  The function which can run one level of compile.
+   * @param log  The log where we write debugging information
+   * @param options  Incremental compilation options
+   * @param equivS  The means of testing whether two "Stamps" are the same.
+   * @return
+   *         A flag of whether or not compilation completed succesfully, and the resulting dependency analysis object.
+   */
   def compile(sources: Set[File],
     entry: String => Option[File],
     previous: Analysis,
@@ -22,7 +51,7 @@ object Incremental {
     {
       val incremental: IncrementalCommon =
         if (options.nameHashing)
-          new IncrementalNameHashing(log, options)
+          new IncrementalNameHashing(new PrefixingLogger("[naha] ")(log), options)
         else if (options.antStyle)
           new IncrementalAntStyle(log, options)
         else
@@ -38,7 +67,7 @@ object Incremental {
       val analysis = manageClassfiles(options) { classfileManager =>
         incremental.cycle(initialInv, sources, binaryChanges, previous, doCompile, classfileManager, 1)
       }
-      (!initialInv.isEmpty, analysis)
+      (initialInv.nonEmpty, analysis)
     }
 
   // the name of system property that was meant to enable debugging mode of incremental compiler but

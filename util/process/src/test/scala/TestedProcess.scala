@@ -3,12 +3,12 @@ package sbt
 import java.io.{ File, FileNotFoundException, IOException }
 
 object exit {
-  def main(args: Array[String]) {
+  def main(args: Array[String]): Unit = {
     System.exit(java.lang.Integer.parseInt(args(0)))
   }
 }
 object cat {
-  def main(args: Array[String]) {
+  def main(args: Array[String]): Unit = {
     try {
       if (args.length == 0)
         IO.transfer(System.in, System.out)
@@ -16,7 +16,7 @@ object cat {
         catFiles(args.toList)
       System.exit(0)
     } catch {
-      case e =>
+      case e: Throwable =>
         e.printStackTrace()
         System.err.println("Error: " + e.toString)
         System.exit(1)
@@ -41,7 +41,6 @@ object cat {
     }
 }
 object echo {
-  def main(args: Array[String]) {
+  def main(args: Array[String]): Unit =
     System.out.println(args.mkString(" "))
-  }
 }

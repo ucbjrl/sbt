@@ -19,6 +19,8 @@ import org.apache.ivy.util.{ FileUtil, ChecksumHelper }
 import org.apache.ivy.core.module.descriptor.{ Artifact => IArtifact }
 
 private[sbt] object ConvertResolver {
+  import UpdateOptions.ResolverConverter
+
   /**
    * This class contains all the reflective lookups used in the
    * checksum-friendly URL publishing shim.
@@ -94,21 +96,31 @@ private[sbt] object ConvertResolver {
     }
   }
 
-  /** Converts the given sbt resolver into an Ivy resolver..*/
-  def apply(r: Resolver, settings: IvySettings, log: Logger) =
-    {
+  /** Converts the given sbt resolver into an Ivy resolver. */
+  @deprecated("Use the variant with updateOptions", "0.13.8")
+  def apply(r: Resolver, settings: IvySettings, log: Logger): DependencyResolver =
+    apply(r, settings, UpdateOptions(), log)
+
+  /** Converts the given sbt resolver into an Ivy resolver. */
+  def apply(r: Resolver, settings: IvySettings, updateOptions: UpdateOptions, log: Logger): DependencyResolver =
+    (updateOptions.resolverConverter orElse defaultConvert)((r, settings, log))
+
+  /** The default implementation of converter. */
+  lazy val defaultConvert: ResolverConverter = {
+    case (r, settings, log) =>
       r match {
         case repo: MavenRepository =>
           {
             val pattern = Collections.singletonList(Resolver.resolvePattern(repo.root, Resolver.mavenStyleBasePattern))
             final class PluginCapableResolver extends IBiblioResolver with ChecksumFriendlyURLResolver with DescriptorRequired {
-              def setPatterns() { // done this way for access to protected methods.
+              def setPatterns(): Unit = {
+                // done this way for access to protected methods.
                 setArtifactPatterns(pattern)
                 setIvyPatterns(pattern)
               }
             }
             val resolver = new PluginCapableResolver
-            resolver.setRepository(new LocalIfFileRepo)
+            if (repo.localIfFile) resolver.setRepository(new LocalIfFileRepo)
             initializeMavenStyle(resolver, repo.name, repo.root)
             resolver.setPatterns() // has to be done after initializeMavenStyle, which calls methods that overwrite the patterns
             resolver
@@ -163,7 +175,7 @@ private[sbt] object ConvertResolver {
         case repo: ChainedResolver => IvySbt.resolverChain(repo.name, repo.resolvers, false, settings, log)
         case repo: RawRepository   => repo.resolver
       }
-    }
+  }
 
   private sealed trait DescriptorRequired extends BasicResolver {
     override def getDependency(dd: DependencyDescriptor, data: ResolveData) =
@@ -177,18 +189,18 @@ private[sbt] object ConvertResolver {
     def hasExplicitURL(dd: DependencyDescriptor): Boolean =
       dd.getAllDependencyArtifacts.exists(_.getUrl != null)
   }
-  private def initializeMavenStyle(resolver: IBiblioResolver, name: String, root: String) {
+  private def initializeMavenStyle(resolver: IBiblioResolver, name: String, root: String): Unit = {
     resolver.setName(name)
     resolver.setM2compatible(true)
     resolver.setRoot(root)
   }
-  private def initializeSSHResolver(resolver: AbstractSshBasedResolver, repo: SshBasedRepository, settings: IvySettings) {
+  private def initializeSSHResolver(resolver: AbstractSshBasedResolver, repo: SshBasedRepository, settings: IvySettings): Unit = {
     resolver.setName(repo.name)
     resolver.setPassfile(null)
     initializePatterns(resolver, repo.patterns, settings)
     initializeConnection(resolver, repo.connection)
   }
-  private def initializeConnection(resolver: AbstractSshBasedResolver, connection: RepositoryHelpers.SshConnection) {
+  private def initializeConnection(resolver: AbstractSshBasedResolver, connection: RepositoryHelpers.SshConnection): Unit = {
     import resolver._
     import connection._
     hostname.foreach(setHost)
@@ -204,7 +216,7 @@ private[sbt] object ConvertResolver {
           setUser(user)
       }
   }
-  private def initializePatterns(resolver: AbstractPatternsBasedResolver, patterns: Patterns, settings: IvySettings) {
+  private def initializePatterns(resolver: AbstractPatternsBasedResolver, patterns: Patterns, settings: IvySettings): Unit = {
     resolver.setM2compatible(patterns.isMavenCompatible)
     resolver.setDescriptor(if (patterns.descriptorOptional) BasicResolver.DESCRIPTOR_OPTIONAL else BasicResolver.DESCRIPTOR_REQUIRED)
     resolver.setCheckconsistency(!patterns.skipConsistencyCheck)
@@ -241,7 +253,7 @@ private[sbt] object ConvertResolver {
           if (totalLength > 0) {
             progress.setTotalLength(totalLength);
           }
-          FileUtil.copy(source, new java.io.File(url.toURI), progress)
+          FileUtil.copy(source, new java.io.File(url.toURI), progress, overwrite)
         } catch {
           case ex: IOException =>
             fireTransferError(ex)

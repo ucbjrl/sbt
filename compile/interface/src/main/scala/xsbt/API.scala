@@ -22,18 +22,21 @@ final class API(val global: CallbackGlobal) extends Compat {
   @inline def debug(msg: => String) = if (settings.verbose.value) inform(msg)
 
   def newPhase(prev: Phase) = new ApiPhase(prev)
-  class ApiPhase(prev: Phase) extends Phase(prev) {
+  class ApiPhase(prev: Phase) extends GlobalPhase(prev) {
     override def description = "Extracts the public API from source files."
     def name = API.name
-    def run: Unit =
+    override def run(): Unit =
       {
         val start = System.currentTimeMillis
-        currentRun.units.foreach(processUnit)
+        super.run
         val stop = System.currentTimeMillis
         debug("API phase took : " + ((stop - start) / 1000.0) + " s")
       }
+
+    def apply(unit: global.CompilationUnit): Unit = processUnit(unit)
+
     def processUnit(unit: CompilationUnit) = if (!unit.isJava) processScalaUnit(unit)
-    def processScalaUnit(unit: CompilationUnit) {
+    def processScalaUnit(unit: CompilationUnit): Unit = {
       val sourceFile = unit.source.file.file
       debug("Traversing " + sourceFile)
       val extractApi = new ExtractAPI[global.type](global, sourceFile)
@@ -59,7 +62,7 @@ final class API(val global: CallbackGlobal) extends Compat {
       definitions += extractApi.classLike(c.owner, c)
     }
     /** Record packages declared in the source file*/
-    def `package`(p: Symbol) {
+    def `package`(p: Symbol): Unit = {
       if ((p eq null) || p == NoSymbol || p.isRoot || p.isRootPackage || p.isEmptyPackageClass || p.isEmptyPackage)
         ()
       else {
@@ -72,7 +75,7 @@ final class API(val global: CallbackGlobal) extends Compat {
   private abstract class TopLevelTraverser extends Traverser {
     def `class`(s: Symbol)
     def `package`(s: Symbol)
-    override def traverse(tree: Tree) {
+    override def traverse(tree: Tree): Unit = {
       tree match {
         case (_: ClassDef | _: ModuleDef) if isTopLevel(tree.symbol) => `class`(tree.symbol)
         case p: PackageDef =>

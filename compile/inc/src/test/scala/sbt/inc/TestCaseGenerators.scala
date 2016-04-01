@@ -10,6 +10,7 @@ import Gen._
 import sbt.Relation
 import xsbti.api._
 import xsbti.SafeLazy
+import xsbti.DependencyContext._
 
 /**
  * Scalacheck generators for Analysis objects and their substructures.
@@ -75,12 +76,12 @@ object TestCaseGenerators {
   private[this] def makeDefinition(name: String): Definition =
     new ClassLike(DefinitionType.ClassDef, lzy(new EmptyType()),
       lzy(new Structure(lzy(Array()), lzy(Array()), lzy(Array()))), Array(), Array(),
-      name, new Public(), new Modifiers(false, false, false, false, false, false, false), Array())
+      name, new Public(), new Modifiers(false, false, false, false, false, false, false, false), Array())
 
   private[this] def lzy[T <: AnyRef](x: T) = SafeLazy.strict(x)
 
   def genNameHash(defn: String): Gen[xsbti.api._internalOnly_NameHash] =
-    value(new xsbti.api._internalOnly_NameHash(defn, defn.hashCode()))
+    const(new xsbti.api._internalOnly_NameHash(defn, defn.hashCode()))
 
   def genNameHashes(defns: Seq[String]): Gen[xsbti.api._internalOnly_NameHashes] = {
     def partitionAccordingToMask[T](mask: List[Boolean], xs: List[T]): (List[T], List[T]) = {
@@ -109,8 +110,9 @@ object TestCaseGenerators {
     hash <- Gen.containerOfN[Array, Byte](hashLen, arbitrary[Byte])
     apiHash <- arbitrary[Int]
     hasMacro <- arbitrary[Boolean]
+    hasPackageObject <- arbitrary[Boolean]
     nameHashes <- genNameHashes(defns)
-  } yield new Source(new Compilation(startTime, Array()), hash, new SourceAPI(Array(), Array(defns map makeDefinition: _*)), apiHash, nameHashes, hasMacro)
+  } yield new Source(new Compilation(startTime, Array()), hash, new SourceAPI(Array(), Array(defns map makeDefinition: _*)), apiHash, nameHashes, hasMacro, hasPackageObject)
 
   def genSources(all_defns: Seq[Seq[String]]): Gen[Seq[Source]] = Gen.sequence[List, Source](all_defns.map(genSource))
 
