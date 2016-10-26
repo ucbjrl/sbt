@@ -162,7 +162,7 @@ private[sbt] case class SbtChainResolver(
         def sorted =
           if (useLatest) (foundRevisions.sortBy {
             case (rmr, resolver) =>
-              Message.warn(s"Sorrting results from $rmr, using ${rmr.getPublicationDate} and ${rmr.getDescriptor.getPublicationDate}")
+              Message.warn(s"Sorting results from $rmr, using ${rmr.getPublicationDate} and ${rmr.getDescriptor.getPublicationDate}")
               // Just issue warning about issues with publication date, and fake one on it for now.
               Option(rmr.getPublicationDate) orElse Option(rmr.getDescriptor.getPublicationDate) match {
                 case None =>
@@ -186,7 +186,6 @@ private[sbt] case class SbtChainResolver(
               }
           }).reverse.headOption map {
             case (rmr, resolver) =>
-              Message.warn(s"Choosing $resolver for ${rmr.getId}")
               // Now that we know the real latest revision, let's force Ivy to use it
               val artifactOpt = findFirstArtifactRef(rmr.getDescriptor, dd, data, resolver)
               artifactOpt match {

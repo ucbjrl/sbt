@@ -80,7 +80,13 @@ final class IncOptions(
      * Once Scala compiler sources are refactored to work well with name hashing algorithm this option will be
      * deleted immediately.
      */
-    val antStyle: Boolean) extends Product with Serializable {
+    val antStyle: Boolean,
+    /**
+     * Include synthetic methods into the dependency tracking by name hashing.
+     */
+    val includeSynthToNameHashing: Boolean,
+    /** Determines whether to log information on file recompiled due to a transitive macro change */
+    val logRecompileOnMacro: Boolean) extends Product with Serializable {
 
   /**
    * Secondary constructor introduced to make IncOptions to be binary compatible with version that didn't have
@@ -90,59 +96,90 @@ final class IncOptions(
     apiDiffContextSize: Int, apiDumpDirectory: Option[java.io.File], newClassfileManager: () => ClassfileManager) = {
     this(transitiveStep, recompileAllFraction, relationsDebug, apiDebug, apiDiffContextSize,
       apiDumpDirectory, newClassfileManager, IncOptions.recompileOnMacroDefDefault, IncOptions.nameHashingDefault,
-      IncOptions.antStyleDefault)
+      IncOptions.antStyleDefault, IncOptions.includeSynthToNameHashingDefault,
+      IncOptions.logRecompileOnMacroDefault)
+  }
+
+  def this(transitiveStep: Int, recompileAllFraction: Double, relationsDebug: Boolean, apiDebug: Boolean,
+    apiDiffContextSize: Int, apiDumpDirectory: Option[java.io.File], newClassfileManager: () => ClassfileManager,
+    recompileOnMacroDef: Boolean, nameHashing: Boolean, antStyle: Boolean) = {
+    this(transitiveStep, recompileAllFraction, relationsDebug, apiDebug,
+      apiDiffContextSize, apiDumpDirectory, newClassfileManager, recompileOnMacroDef, nameHashing,
+      antStyle, IncOptions.includeSynthToNameHashingDefault, IncOptions.logRecompileOnMacroDefault)
   }
 
   assert(!(antStyle && nameHashing), "Name hashing and Ant-style cannot be enabled at the same time.")
 
   def withTransitiveStep(transitiveStep: Int): IncOptions = {
     new IncOptions(transitiveStep, recompileAllFraction, relationsDebug, apiDebug, apiDiffContextSize,
-      apiDumpDirectory, newClassfileManager, recompileOnMacroDef, nameHashing, antStyle)
+      apiDumpDirectory, newClassfileManager, recompileOnMacroDef, nameHashing, antStyle,
+      includeSynthToNameHashing, logRecompileOnMacro)
   }
 
   def withRecompileAllFraction(recompileAllFraction: Double): IncOptions = {
     new IncOptions(transitiveStep, recompileAllFraction, relationsDebug, apiDebug, apiDiffContextSize,
-      apiDumpDirectory, newClassfileManager, recompileOnMacroDef, nameHashing, antStyle)
+      apiDumpDirectory, newClassfileManager, recompileOnMacroDef, nameHashing, antStyle,
+      includeSynthToNameHashing, logRecompileOnMacro)
   }
 
   def withRelationsDebug(relationsDebug: Boolean): IncOptions = {
     new IncOptions(transitiveStep, recompileAllFraction, relationsDebug, apiDebug, apiDiffContextSize,
-      apiDumpDirectory, newClassfileManager, recompileOnMacroDef, nameHashing, antStyle)
+      apiDumpDirectory, newClassfileManager, recompileOnMacroDef, nameHashing, antStyle,
+      includeSynthToNameHashing, logRecompileOnMacro)
   }
 
   def withApiDebug(apiDebug: Boolean): IncOptions = {
     new IncOptions(transitiveStep, recompileAllFraction, relationsDebug, apiDebug, apiDiffContextSize,
-      apiDumpDirectory, newClassfileManager, recompileOnMacroDef, nameHashing, antStyle)
+      apiDumpDirectory, newClassfileManager, recompileOnMacroDef, nameHashing, antStyle,
+      includeSynthToNameHashing, logRecompileOnMacro)
   }
 
   def withApiDiffContextSize(apiDiffContextSize: Int): IncOptions = {
     new IncOptions(transitiveStep, recompileAllFraction, relationsDebug, apiDebug, apiDiffContextSize,
-      apiDumpDirectory, newClassfileManager, recompileOnMacroDef, nameHashing, antStyle)
+      apiDumpDirectory, newClassfileManager, recompileOnMacroDef, nameHashing, antStyle,
+      includeSynthToNameHashing, logRecompileOnMacro)
   }
 
   def withApiDumpDirectory(apiDumpDirectory: Option[File]): IncOptions = {
     new IncOptions(transitiveStep, recompileAllFraction, relationsDebug, apiDebug, apiDiffContextSize,
-      apiDumpDirectory, newClassfileManager, recompileOnMacroDef, nameHashing, antStyle)
+      apiDumpDirectory, newClassfileManager, recompileOnMacroDef, nameHashing, antStyle,
+      includeSynthToNameHashing, logRecompileOnMacro)
   }
 
   def withNewClassfileManager(newClassfileManager: () => ClassfileManager): IncOptions = {
     new IncOptions(transitiveStep, recompileAllFraction, relationsDebug, apiDebug, apiDiffContextSize,
-      apiDumpDirectory, newClassfileManager, recompileOnMacroDef, nameHashing, antStyle)
+      apiDumpDirectory, newClassfileManager, recompileOnMacroDef, nameHashing, antStyle,
+      includeSynthToNameHashing, logRecompileOnMacro)
   }
 
   def withRecompileOnMacroDef(recompileOnMacroDef: Boolean): IncOptions = {
     new IncOptions(transitiveStep, recompileAllFraction, relationsDebug, apiDebug, apiDiffContextSize,
-      apiDumpDirectory, newClassfileManager, recompileOnMacroDef, nameHashing, antStyle)
+      apiDumpDirectory, newClassfileManager, recompileOnMacroDef, nameHashing, antStyle,
+      includeSynthToNameHashing, logRecompileOnMacro)
   }
 
   def withNameHashing(nameHashing: Boolean): IncOptions = {
     new IncOptions(transitiveStep, recompileAllFraction, relationsDebug, apiDebug, apiDiffContextSize,
-      apiDumpDirectory, newClassfileManager, recompileOnMacroDef, nameHashing, antStyle)
+      apiDumpDirectory, newClassfileManager, recompileOnMacroDef, nameHashing, antStyle,
+      includeSynthToNameHashing, logRecompileOnMacro)
+  }
+
+  def withIncludeSynthToNameHashing(includeSynthToNameHashing: Boolean): IncOptions = {
+    new IncOptions(transitiveStep, recompileAllFraction, relationsDebug, apiDebug, apiDiffContextSize,
+      apiDumpDirectory, newClassfileManager, recompileOnMacroDef, nameHashing, antStyle,
+      includeSynthToNameHashing, logRecompileOnMacro)
   }
 
   def withAntStyle(antStyle: Boolean): IncOptions = {
     new IncOptions(transitiveStep, recompileAllFraction, relationsDebug, apiDebug, apiDiffContextSize,
-      apiDumpDirectory, newClassfileManager, recompileOnMacroDef, nameHashing, antStyle)
+      apiDumpDirectory, newClassfileManager, recompileOnMacroDef, nameHashing, antStyle,
+      includeSynthToNameHashing, logRecompileOnMacro)
+  }
+
+  def withLogRecompileOnMacro(logRecompileOnMacro: Boolean): IncOptions = {
+    new IncOptions(transitiveStep, recompileAllFraction, relationsDebug, apiDebug, apiDiffContextSize,
+      apiDumpDirectory, newClassfileManager, recompileOnMacroDef, nameHashing, antStyle,
+      includeSynthToNameHashing, logRecompileOnMacro)
   }
 
   //- EXPANDED CASE CLASS METHOD BEGIN -//
@@ -219,6 +256,9 @@ object IncOptions extends Serializable {
   private val recompileOnMacroDefDefault: Boolean = true
   private[sbt] val nameHashingDefault: Boolean = true
   private val antStyleDefault: Boolean = false
+  // This should default to false
+  private[sbt] val includeSynthToNameHashingDefault = java.lang.Boolean.getBoolean("sbt.inc.include_synth")
+  private[sbt] val logRecompileOnMacroDefault = true
   val Default = IncOptions(
     //    1. recompile changed sources
     // 2(3). recompile direct dependencies and transitive public inheritance dependencies of sources with API changes in 1(2).
