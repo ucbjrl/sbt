@@ -29,7 +29,7 @@ object ScalaArtifacts {
 
   private[sbt] def toolDependencies(org: String, version: String, isDotty: Boolean = false): Seq[ModuleID] =
     if (isDotty)
-      Seq(ModuleID(org, DottyIDPrefix, version, Some(Configurations.ScalaTool.name + "->compile"),
+      Seq(ModuleID(org, DottyIDPrefix, version, Some(Configurations.ScalaTool.name + "->default(compile)"),
         crossVersion = CrossVersion.binary))
     else
       Seq(scalaToolDependency(org, ScalaArtifacts.CompilerID, version),
@@ -49,24 +49,39 @@ final case class IvyScala(scalaFullVersion: String, scalaBinaryVersion: String, 
 
 private object IvyScala {
   /** Performs checks/adds filters on Scala dependencies (if enabled in IvyScala). */
-  def checkModule(module: DefaultModuleDescriptor, conf: String, log: Logger)(check: IvyScala): Unit = {
+  def checkModule(module: DefaultModuleDescriptor, conf: String, scalaVersionConfigs: Vector[String], log: Logger)(check: IvyScala): Unit = {
     if (check.checkExplicit)
-      checkDependencies(module, check.scalaOrganization, check.scalaBinaryVersion, check.configurations, log)
+      checkDependencies(module, check.scalaOrganization, check.scalaBinaryVersion, scalaVersionConfigs, log)
     if (check.filterImplicit)
       excludeScalaJars(module, check.configurations)
     if (check.overrideScalaVersion)
-      overrideScalaVersion(module, check.scalaOrganization, check.scalaFullVersion)
+      overrideScalaVersion(module, check.scalaOrganization, check.scalaFullVersion, scalaVersionConfigs)
   }
 
-  class OverrideScalaMediator(scalaOrganization: String, scalaVersion: String) extends DependencyDescriptorMediator {
+  class OverrideScalaMediator(scalaOrganization: String, scalaVersion: String, scalaVersionConfigs0: Vector[String]) extends DependencyDescriptorMediator {
+    private[this] val scalaVersionConfigs = scalaVersionConfigs0.toSet
     def mediate(dd: DependencyDescriptor): DependencyDescriptor = {
+      // Mediate only for the dependencies in scalaVersion configurations. https://github.com/sbt/sbt/issues/2786
+      def configQualifies: Boolean =
+        (dd.getModuleConfigurations exists { scalaVersionConfigs })
+      // Do not rewrite the dependencies of Scala dependencies themselves, this prevents bootstrapping
+      // a Scala compiler using another Scala compiler.
+      def dependeeQualifies: Boolean =
+        dd.getParentRevisionId == null || (
+          dd.getParentRevisionId.getName match {
+            case name @ (CompilerID | LibraryID | ReflectID | ActorsID | ScalapID) =>
+              false
+            case _ =>
+              true
+          }
+        )
       val transformer =
         new NamespaceTransformer {
           def transform(mrid: ModuleRevisionId): ModuleRevisionId = {
             if (mrid == null) mrid
             else
               mrid.getName match {
-                case name @ (CompilerID | LibraryID | ReflectID | ActorsID | ScalapID) =>
+                case name @ (CompilerID | LibraryID | ReflectID | ActorsID | ScalapID) if configQualifies && dependeeQualifies =>
                   ModuleRevisionId.newInstance(scalaOrganization, name, mrid.getBranch, scalaVersion, mrid.getQualifiedExtraAttributes)
                 case _ => mrid
               }
@@ -79,8 +94,8 @@ private object IvyScala {
     }
   }
 
-  def overrideScalaVersion(module: DefaultModuleDescriptor, organization: String, version: String): Unit = {
-    val mediator = new OverrideScalaMediator(organization, version)
+  def overrideScalaVersion(module: DefaultModuleDescriptor, organization: String, version: String, scalaVersionConfigs: Vector[String]): Unit = {
+    val mediator = new OverrideScalaMediator(organization, version, scalaVersionConfigs)
     module.addDependencyDescriptorMediator(new ModuleId(Organization, "*"), ExactPatternMatcher.INSTANCE, mediator)
     if (organization != Organization)
       module.addDependencyDescriptorMediator(new ModuleId(organization, "*"), ExactPatternMatcher.INSTANCE, mediator)
@@ -96,8 +111,8 @@ private object IvyScala {
    * Checks the immediate dependencies of module for dependencies on scala jars and verifies that the version on the
    * dependencies matches scalaVersion.
    */
-  private def checkDependencies(module: ModuleDescriptor, scalaOrganization: String, scalaBinaryVersion: String, configurations: Iterable[Configuration], log: Logger): Unit = {
-    val configSet = if (configurations.isEmpty) (c: String) => true else configurationSet(configurations)
+  private def checkDependencies(module: ModuleDescriptor, scalaOrganization: String, scalaBinaryVersion: String, scalaVersionConfigs0: Vector[String], log: Logger): Unit = {
+    val scalaVersionConfigs: String => Boolean = if (scalaVersionConfigs0.isEmpty) (c: String) => false else scalaVersionConfigs0.toSet
     def binaryScalaWarning(dep: DependencyDescriptor): Option[String] =
       {
         val id = dep.getDependencyRevisionId
@@ -105,7 +120,7 @@ private object IvyScala {
         def isScalaLangOrg = id.getOrganisation == scalaOrganization
         def isScalaArtifact = Artifacts.contains(id.getName)
         def hasBinVerMismatch = depBinaryVersion != scalaBinaryVersion
-        def matchesOneOfTheConfigs = dep.getModuleConfigurations.exists(configSet)
+        def matchesOneOfTheConfigs = dep.getModuleConfigurations exists { scalaVersionConfigs }
         val mismatched = isScalaLangOrg && isScalaArtifact && hasBinVerMismatch && matchesOneOfTheConfigs
         if (mismatched)
           Some("Binary version (" + depBinaryVersion + ") for dependency " + id +

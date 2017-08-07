@@ -31,8 +31,7 @@ class EvictionWarningSpec extends BaseIvySpecification {
 
   Including two (suspect) transitively binary incompatible Java libraries to
   direct dependencies should
-    be not detected as eviction                                 $javaLibTransitiveWarn1
-    be detected if it's enabled                                 $javaLibTransitiveWarn2
+    be detected as eviction                                     $javaLibTransitiveWarn2
     print out message about the eviction if it's enabled        $javaLibTransitiveWarn3
 
   Including two (suspect) binary incompatible Scala libraries to
@@ -47,8 +46,7 @@ class EvictionWarningSpec extends BaseIvySpecification {
 
   Including two (suspect) transitively binary incompatible Scala libraries to
   direct dependencies should
-    be not detected as eviction                                 $scalaLibTransitiveWarn1
-    be detected if it's enabled                                 $scalaLibTransitiveWarn2
+    be detected as eviction                                     $scalaLibTransitiveWarn2
     print out message about the eviction if it's enabled        $scalaLibTransitiveWarn3
                                                                 """
 
@@ -87,9 +85,10 @@ class EvictionWarningSpec extends BaseIvySpecification {
   def scalaVersionWarn3 = {
     val m = module(defaultModuleId, scalaVersionDeps, Some("2.10.2"), overrideScalaVersion = false)
     val report = ivyUpdate(m)
-    EvictionWarning(m, defaultOptions, report, log).lines must_==
+    EvictionWarning(m, defaultOptions.withShowCallers(false), report, log).lines must_==
       List("Scala version was updated by one of library dependencies:",
-        "\t* org.scala-lang:scala-library:2.10.2 -> 2.10.3",
+        "\t* org.scala-lang:scala-library:2.10.3 is selected over 2.10.2",
+        "",
         "To force scalaVersion, add the following:",
         "\tivyScala := ivyScala.value map { _.copy(overrideScalaVersion = true) }",
         "Run 'evicted' to see detailed eviction warnings")
@@ -98,11 +97,15 @@ class EvictionWarningSpec extends BaseIvySpecification {
   def scalaVersionWarn4 = {
     val m = module(defaultModuleId, scalaVersionDeps, Some("2.10.2"), overrideScalaVersion = false)
     val report = ivyUpdate(m)
-    EvictionWarning(m, defaultOptions.withShowCallers(true), report, log).lines must_==
+    EvictionWarning(m, defaultOptions, report, log).lines must_==
       List("Scala version was updated by one of library dependencies:",
-        "\t* org.scala-lang:scala-library:2.10.2 -> 2.10.3 (caller: com.typesafe.akka:akka-actor_2.10:2.3.0, com.example:foo:0.1.0)",
+        "\t* org.scala-lang:scala-library:2.10.3 is selected over 2.10.2",
+        "\t    +- com.typesafe.akka:akka-actor_2.10:2.3.0            (depends on 2.10.3)",
+        "\t    +- com.example:foo:0.1.0                              (depends on 2.10.2)",
+        "",
         "To force scalaVersion, add the following:",
-        "\tivyScala := ivyScala.value map { _.copy(overrideScalaVersion = true) }")
+        "\tivyScala := ivyScala.value map { _.copy(overrideScalaVersion = true) }",
+        "Run 'evicted' to see detailed eviction warnings")
   }
 
   def scalaVersionWarn5 = {
@@ -114,7 +117,8 @@ class EvictionWarningSpec extends BaseIvySpecification {
   def scalaVersionWarn6 = {
     val m = module(defaultModuleId, scalaVersionDeps, Some("2.10.2"))
     val report = ivyUpdate(m)
-    EvictionWarning(m, defaultOptions.withWarnScalaVersionEviction(false), report, log).scalaEvictions must have size (0)
+    EvictionWarning(m, defaultOptions.withWarnScalaVersionEviction(false),
+      report, log).scalaEvictions must have size (0)
   }
 
   def javaLibDirectDeps = Seq(commonsIo14, commonsIo24)
@@ -128,16 +132,21 @@ class EvictionWarningSpec extends BaseIvySpecification {
   def javaLibWarn2 = {
     val m = module(defaultModuleId, javaLibDirectDeps, Some("2.10.3"))
     val report = ivyUpdate(m)
-    EvictionWarning(m, defaultOptions.withWarnDirectEvictions(false), report, log).reportedEvictions must have size (0)
+    EvictionWarning(m, defaultOptions
+      .withWarnDirectEvictions(false)
+      .withWarnTransitiveEvictions(false),
+      report, log).reportedEvictions must have size (0)
   }
 
   def javaLibWarn3 = {
     val m = module(defaultModuleId, javaLibDirectDeps, Some("2.10.3"))
     val report = ivyUpdate(m)
     EvictionWarning(m, defaultOptions, report, log).lines must_==
-      List("There may be incompatibilities among your library dependencies.",
-        "Here are some of the libraries that were evicted:",
-        "\t* commons-io:commons-io:1.4 -> 2.4",
+      List("Found version conflict(s) in library dependencies; some are suspected to be binary incompatible:",
+        "",
+        "\t* commons-io:commons-io:2.4 is selected over 1.4",
+        "\t    +- com.example:foo:0.1.0                              (depends on 1.4)",
+        "",
         "Run 'evicted' to see detailed eviction warnings")
   }
 
@@ -145,9 +154,12 @@ class EvictionWarningSpec extends BaseIvySpecification {
     val m = module(defaultModuleId, javaLibDirectDeps, Some("2.10.3"))
     val report = ivyUpdate(m)
     EvictionWarning(m, defaultOptions.withShowCallers(true), report, log).lines must_==
-      List("There may be incompatibilities among your library dependencies.",
-        "Here are some of the libraries that were evicted:",
-        "\t* commons-io:commons-io:1.4 -> 2.4 (caller: com.example:foo:0.1.0)")
+      List("Found version conflict(s) in library dependencies; some are suspected to be binary incompatible:",
+        "",
+        "\t* commons-io:commons-io:2.4 is selected over 1.4",
+        "\t    +- com.example:foo:0.1.0                              (depends on 1.4)",
+        "",
+        "Run 'evicted' to see detailed eviction warnings")
   }
 
   def javaLibNoWarn1 = {
@@ -166,25 +178,23 @@ class EvictionWarningSpec extends BaseIvySpecification {
 
   def javaLibTransitiveDeps = Seq(unfilteredUploads080, bnfparser10)
 
-  def javaLibTransitiveWarn1 = {
-    val m = module(defaultModuleId, javaLibTransitiveDeps, Some("2.10.3"))
-    val report = ivyUpdate(m)
-    EvictionWarning(m, defaultOptions, report, log).reportedEvictions must have size (0)
-  }
-
   def javaLibTransitiveWarn2 = {
     val m = module(defaultModuleId, javaLibTransitiveDeps, Some("2.10.3"))
     val report = ivyUpdate(m)
-    EvictionWarning(m, defaultOptions.withWarnTransitiveEvictions(true), report, log).reportedEvictions must have size (1)
+    EvictionWarning(m, defaultOptions, report, log).reportedEvictions must have size (1)
   }
 
   def javaLibTransitiveWarn3 = {
     val m = module(defaultModuleId, javaLibTransitiveDeps, Some("2.10.3"))
     val report = ivyUpdate(m)
-    EvictionWarning(m, defaultOptions.withWarnTransitiveEvictions(true).withShowCallers(true), report, log).lines must_==
-      List("There may be incompatibilities among your library dependencies.",
-        "Here are some of the libraries that were evicted:",
-        "\t* commons-io:commons-io:1.4 -> 2.4 (caller: ca.gobits.bnf:bnfparser:1.0, net.databinder:unfiltered-uploads_2.10:0.8.0)")
+    EvictionWarning(m, defaultOptions, report, log).lines must_==
+      List("Found version conflict(s) in library dependencies; some are suspected to be binary incompatible:",
+        "",
+        "\t* commons-io:commons-io:2.4 is selected over 1.4",
+        "\t    +- ca.gobits.bnf:bnfparser:1.0                        (depends on 2.4)",
+        "\t    +- net.databinder:unfiltered-uploads_2.10:0.8.0       (depends on 1.4)",
+        "",
+        "Run 'evicted' to see detailed eviction warnings")
   }
 
   def scalaLibWarn1 = {
@@ -199,9 +209,11 @@ class EvictionWarningSpec extends BaseIvySpecification {
     val m = module(defaultModuleId, deps, Some("2.10.4"))
     val report = ivyUpdate(m)
     EvictionWarning(m, defaultOptions, report, log).lines must_==
-      List("There may be incompatibilities among your library dependencies.",
-        "Here are some of the libraries that were evicted:",
-        "\t* com.typesafe.akka:akka-actor_2.10:2.1.4 -> 2.3.4",
+      List("Found version conflict(s) in library dependencies; some are suspected to be binary incompatible:",
+        "",
+        "\t* com.typesafe.akka:akka-actor_2.10:2.3.4 is selected over 2.1.4",
+        "\t    +- com.example:foo:0.1.0                              (depends on 2.1.4)",
+        "",
         "Run 'evicted' to see detailed eviction warnings")
   }
 
@@ -221,24 +233,25 @@ class EvictionWarningSpec extends BaseIvySpecification {
 
   def scalaLibTransitiveDeps = Seq(scala2104, bananaSesame04, akkaRemote234)
 
-  def scalaLibTransitiveWarn1 = {
-    val m = module(defaultModuleId, scalaLibTransitiveDeps, Some("2.10.4"))
-    val report = ivyUpdate(m)
-    EvictionWarning(m, defaultOptions, report, log).reportedEvictions must have size (0)
-  }
-
   def scalaLibTransitiveWarn2 = {
     val m = module(defaultModuleId, scalaLibTransitiveDeps, Some("2.10.4"))
     val report = ivyUpdate(m)
-    EvictionWarning(m, defaultOptions.withWarnTransitiveEvictions(true), report, log).reportedEvictions must have size (1)
+    EvictionWarning(m, defaultOptions, report, log).reportedEvictions must have size (1)
   }
 
   def scalaLibTransitiveWarn3 = {
     val m = module(defaultModuleId, scalaLibTransitiveDeps, Some("2.10.4"))
     val report = ivyUpdate(m)
-    EvictionWarning(m, defaultOptions.withWarnTransitiveEvictions(true).withShowCallers(true), report, log).lines must_==
-      List("There may be incompatibilities among your library dependencies.",
-        "Here are some of the libraries that were evicted:",
-        "\t* com.typesafe.akka:akka-actor_2.10:2.1.4 -> 2.3.4 (caller: com.typesafe.akka:akka-remote_2.10:2.3.4, org.w3:banana-sesame_2.10:0.4, org.w3:banana-rdf_2.10:0.4)")
+    val actual = EvictionWarning(m, defaultOptions, report, log).lines
+    // println(actual.mkString("\n"))
+    actual must_==
+      List("Found version conflict(s) in library dependencies; some are suspected to be binary incompatible:",
+        "",
+        "\t* com.typesafe.akka:akka-actor_2.10:2.3.4 is selected over 2.1.4",
+        "\t    +- com.typesafe.akka:akka-remote_2.10:2.3.4           (depends on 2.3.4)",
+        "\t    +- org.w3:banana-rdf_2.10:0.4                         (depends on 2.1.4)",
+        "\t    +- org.w3:banana-sesame_2.10:0.4                      (depends on 2.1.4)",
+        "",
+        "Run 'evicted' to see detailed eviction warnings")
   }
 }

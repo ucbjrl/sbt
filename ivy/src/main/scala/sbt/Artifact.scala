@@ -9,6 +9,30 @@ import sbt.serialization._
 
 final case class Artifact(name: String, `type`: String, extension: String, classifier: Option[String], configurations: Iterable[Configuration], url: Option[URL], extraAttributes: Map[String, String]) {
   def extra(attributes: (String, String)*) = Artifact(name, `type`, extension, classifier, configurations, url, extraAttributes ++ ModuleID.checkE(attributes))
+
+  /** Copy with a new type. */
+  def withType(`type`: String): Artifact =
+    copy(`type` = `type`)
+
+  /** Copy with a new extension. */
+  def withExtension(extension: String): Artifact =
+    copy(extension = extension)
+
+  /** Copy with a new classifier. */
+  def withClassifier(classifier: Option[String]): Artifact =
+    copy(classifier = classifier)
+
+  /** Copy with new configurations. */
+  def withConfigurations(configurations: Vector[Configuration]): Artifact =
+    copy(configurations = configurations)
+
+  /** Copy with a new url. */
+  def withUrl(url: Option[URL]): Artifact =
+    copy(url = url)
+
+  /** Copy with new extraAttributes. */
+  def withExtraAttributes(extraAttributes: Map[String, String]): Artifact =
+    copy(extraAttributes = extraAttributes)
 }
 
 import Configurations.{ config, Docs, Optional, Pom, Sources, Test }
@@ -73,6 +97,14 @@ object Artifact {
   def classified(name: String, classifier: String): Artifact =
     Artifact(name, classifierType(classifier), DefaultExtension, Some(classifier), classifierConf(classifier) :: Nil, None)
 
+  // WORKAROUND sbt/sbt#2812 scaladoc 2.10 struggles with FastTypeTag's macro
+  import scala.pickling.FastTypeTag
+  private[this] implicit val tag: FastTypeTag[Artifact] = FastTypeTag.apply
+  private[this] implicit val optionStringTag: FastTypeTag[Option[String]] = FastTypeTag.apply
+  private[this] implicit val configurationTag: FastTypeTag[Configuration] = FastTypeTag.apply
+  private[this] implicit val vectorConfigurationTag: FastTypeTag[Vector[Configuration]] = FastTypeTag.apply
+  private[this] implicit val stringStringMapTag: FastTypeTag[Map[String, String]] = FastTypeTag.apply
+
   private val optStringPickler = implicitly[Pickler[Option[String]]]
   private val optStringUnpickler = implicitly[Unpickler[Option[String]]]
   private val vectorConfigurationPickler = implicitly[Pickler[Vector[Configuration]]]
@@ -81,11 +113,8 @@ object Artifact {
   private val stringStringMapUnpickler = implicitly[Unpickler[Map[String, String]]]
 
   implicit val pickler: Pickler[Artifact] = new Pickler[Artifact] {
-    val tag = implicitly[FastTypeTag[Artifact]]
+    val tag = Artifact.this.tag
     val stringTag = implicitly[FastTypeTag[String]]
-    val optionStringTag = implicitly[FastTypeTag[Option[String]]]
-    val vectorConfigurationTag = implicitly[FastTypeTag[Vector[Configuration]]]
-    val stringStringMapTag = implicitly[FastTypeTag[Map[String, String]]]
     def pickle(a: Artifact, builder: PBuilder): Unit = {
       builder.pushHints()
       builder.hintTag(tag)
@@ -123,7 +152,7 @@ object Artifact {
     }
   }
   implicit val unpickler: Unpickler[Artifact] = new Unpickler[Artifact] {
-    val tag = implicitly[FastTypeTag[Artifact]]
+    val tag = Artifact.this.tag
     def unpickle(tpe: String, reader: PReader): Any = {
       reader.pushHints()
       // reader.hintTag(tag)

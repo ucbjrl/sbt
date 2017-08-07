@@ -18,7 +18,7 @@ object TaskInstance extends MonadInstance {
   import TaskExtra._
 
   final type M[x] = Task[x]
-  def app[K[L[x]], Z](in: K[Task], f: K[Id] => Z)(implicit a: AList[K]): Task[Z] = Task(Info(), new Mapped[Z, K](in, f compose allM, a))
+  def app[K[L[x]], Z](in: K[Task], f: K[Id] => Z)(implicit a: AList[K]): Task[Z] = in map f
   def map[S, T](in: Task[S], f: S => T): Task[T] = in map f
   def flatten[T](in: Task[Task[T]]): Task[T] = in flatMap idFun[Task[T]]
   def pure[T](t: () => T): Task[T] = toTask(t)
@@ -72,8 +72,8 @@ object TaskMacro {
   final val TransformInitName = "transform"
   final val InputTaskCreateDynName = "createDyn"
   final val InputTaskCreateFreeName = "createFree"
-  final val append1Migration = "`<+=` operator is deprecated. Use `lhs += { x.value }`."
-  final val appendNMigration = "`<++=` operator is deprecated. Use `lhs ++= { x.value }`."
+  final val append1Migration = "`<+=` operator is deprecated. Try `lhs += { x.value }`\n  or see http://www.scala-sbt.org/0.13/docs/Migrating-from-sbt-012x.html."
+  final val appendNMigration = "`<++=` operator is deprecated. Try `lhs ++= { x.value }`\n  or see http://www.scala-sbt.org/0.13/docs/Migrating-from-sbt-012x.html."
   final val assignMigration =
     """`<<=` operator is deprecated. Use `key := { x.value }` or `key ~= (old => { newValue })`.
       |See http://www.scala-sbt.org/0.13/docs/Migrating-from-sbt-012x.html""".stripMargin
@@ -168,9 +168,25 @@ object TaskMacro {
   /** Implementation of += macro for settings. */
   def settingAppend1Impl[T: c.WeakTypeTag, U: c.WeakTypeTag](c: Context)(v: c.Expr[U])(a: c.Expr[Append.Value[T, U]]): c.Expr[Setting[T]] =
     {
-      val init = SettingMacro.settingMacroImpl[U](c)(v)
-      val append = appendMacroImpl(c)(init.tree, a.tree)(Append1InitName)
-      c.Expr[Setting[T]](append)
+      import c.universe._
+      val util = ContextUtil[c.type](c)
+      val ttpe = c.weakTypeOf[T]
+      val typeArgs = util.typeArgs(ttpe)
+      v.tree.tpe match {
+        // To allow Initialize[Task[A]] in the position of += RHS, we're going to call "taskValue" automatically.
+        case tpe if typeArgs.nonEmpty && (typeArgs.head weak_<:< c.weakTypeOf[Task[_]])
+          && (tpe weak_<:< c.weakTypeOf[Initialize[_]]) =>
+          c.macroApplication match {
+            case Apply(Apply(TypeApply(Select(preT, nmeT), targs), _), _) =>
+              val tree = Apply(TypeApply(Select(preT, newTermName("+=").encodedName), TypeTree(typeArgs.head) :: Nil), Select(v.tree, newTermName("taskValue").encodedName) :: Nil)
+              c.Expr[Setting[T]](tree)
+            case x => ContextUtil.unexpectedTree(x)
+          }
+        case _ =>
+          val init = SettingMacro.settingMacroImpl[U](c)(v)
+          val append = appendMacroImpl(c)(init.tree, a.tree)(Append1InitName)
+          c.Expr[Setting[T]](append)
+      }
     }
   /** Implementation of ++= macro for tasks. */
   def taskAppendNImpl[T: c.WeakTypeTag, U: c.WeakTypeTag](c: Context)(vs: c.Expr[U])(a: c.Expr[Append.Values[T, U]]): c.Expr[Setting[Task[T]]] =
@@ -186,7 +202,6 @@ object TaskMacro {
       val append = appendMacroImpl(c)(init.tree, a.tree)(AppendNInitName)
       c.Expr[Setting[T]](append)
     }
-
   /** Implementation of -= macro for tasks. */
   def taskRemove1Impl[T: c.WeakTypeTag, U: c.WeakTypeTag](c: Context)(v: c.Expr[U])(r: c.Expr[Remove.Value[T, U]]): c.Expr[Setting[Task[T]]] =
     {
@@ -221,7 +236,7 @@ object TaskMacro {
       import c.universe.{ Apply, ApplyTag, newTermName, Select, SelectTag, TypeApply, TypeApplyTag }
       c.macroApplication match {
         case Apply(Apply(TypeApply(Select(preT, nmeT), targs), _), a) =>
-          Apply(Apply(TypeApply(Select(preT, newTermName(newName).encodedName), targs), init :: sourcePosition(c).tree :: Nil), a)
+          Apply(Apply(TypeApply(Select(preT, newTermName(newName).encodedName), targs), init :: sourcePosition(c).tree :: Nil), append :: Nil)
         case x => ContextUtil.unexpectedTree(x)
       }
     }

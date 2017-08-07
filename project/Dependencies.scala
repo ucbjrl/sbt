@@ -9,8 +9,8 @@ object Dependencies {
   lazy val scala211 = "2.11.8"
   lazy val scala212 = "2.12.0-RC2"
 
-  lazy val jline = "jline" % "jline" % "2.13"
-  lazy val ivy = "org.scala-sbt.ivy" % "ivy" % "2.3.0-sbt-2cf13e211b2cb31f0d3b317289dca70eca3362f6"
+  lazy val jline = "jline" % "jline" % "2.14.4"
+  lazy val ivy = "org.scala-sbt.ivy" % "ivy" % "2.3.0-sbt-48dd0744422128446aee9ac31aa356ee203cc9f4"
   lazy val jsch = "com.jcraft" % "jsch" % "0.1.50" intransitive ()
   lazy val sbinary = "org.scala-tools.sbinary" %% "sbinary" % "0.4.2"
   lazy val sbtSerialization = "org.scala-sbt" %% "serialization" % "0.1.2"
@@ -20,8 +20,8 @@ object Dependencies {
   lazy val scalaCheck = "org.scalacheck" %% "scalacheck" % "1.11.4"
   lazy val specs2 = "org.specs2" %% "specs2" % "2.3.11"
   lazy val junit = "junit" % "junit" % "4.11"
-  lazy val launcherInterface = "org.scala-sbt" % "launcher-interface" % "1.0.0-M1"
-  lazy val rawLauncher = "org.scala-sbt" % "launcher" % "1.0.0-M1"
+  lazy val launcherInterface = "org.scala-sbt" % "launcher-interface" % "1.0.1"
+  lazy val rawLauncher = "org.scala-sbt" % "launcher" % "1.0.1"
   lazy val templateResolverApi = "org.scala-sbt" % "template-resolver" % "0.1"
 
   private def scala211Module(name: String, moduleVersion: String) =

@@ -5,6 +5,7 @@ package sbt
 
 import java.io.File
 import java.util.concurrent.Callable
+import sbt.BasicCommandStrings.Shell
 
 /**
  * Data structure representing all command execution information.
@@ -176,13 +177,16 @@ object State {
 
   /** Provides operations and transformations on State. */
   implicit def stateOps(s: State): StateOps = new StateOps {
-    def process(f: (String, State) => State): State =
-      s.remainingCommands match {
-        case Seq() => exit(true)
-        case Seq(x, xs @ _*) =>
-          log.debug(s"> $x")
-          f(x, s.copy(remainingCommands = xs, history = x :: s.history))
+    def process(f: (String, State) => State): State = {
+      def runCmd(cmd: String, remainingCommands: Seq[String]) = {
+        log.debug(s"> $cmd")
+        f(cmd, s.copy(remainingCommands = remainingCommands, history = cmd :: s.history))
       }
+      s.remainingCommands match {
+        case Seq()           => exit(true)
+        case Seq(x, xs @ _*) => runCmd(x, xs)
+      }
+    }
     def :::(newCommands: Seq[String]): State = s.copy(remainingCommands = newCommands ++ s.remainingCommands)
     def ::(command: String): State = (command :: Nil) ::: this
     def ++(newCommands: Seq[Command]): State = s.copy(definedCommands = (s.definedCommands ++ newCommands).distinct)

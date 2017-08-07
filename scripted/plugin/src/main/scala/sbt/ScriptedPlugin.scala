@@ -9,6 +9,7 @@ import complete.{ Parser, DefaultParsers }
 import classpath.ClasspathUtilities
 import java.lang.reflect.{ InvocationTargetException, Method }
 import java.util.Properties
+import CrossVersion.partialVersion
 
 object ScriptedPlugin extends Plugin {
   def scriptedConf = config("scripted-sbt") hide
@@ -38,20 +39,51 @@ object ScriptedPlugin extends Plugin {
       m.getClass.getMethod("run", classOf[File], classOf[Boolean], classOf[Array[String]], classOf[File], classOf[Array[String]])
   }
 
-  private def scriptedParser(scriptedBase: File): Parser[Seq[String]] =
+  import DefaultParsers._
+  case class ScriptedTestPage(page: Int, total: Int)
+
+  private[sbt] def scriptedParser(scriptedBase: File): Parser[Seq[String]] =
     {
-      import DefaultParsers._
-      val pairs = (scriptedBase * AllPassFilter * AllPassFilter * "test").get map { (f: File) =>
+
+      val scriptedFiles: NameFilter = ("test": NameFilter) | "pending"
+      val pairs = (scriptedBase * AllPassFilter * AllPassFilter * scriptedFiles).get map { (f: File) =>
         val p = f.getParentFile
         (p.getParentFile.getName, p.getName)
       }
-      val pairMap = pairs.groupBy(_._1).mapValues(_.map(_._2).toSet)
+      val pairMap = pairs.groupBy(_._1).mapValues(_.map(_._2).toSet);
 
       val id = charClass(c => !c.isWhitespace && c != '/').+.string
-      val groupP = token(id.examples(pairMap.keySet)) <~ token('/')
-      def nameP(group: String) = token("*".id | id.examples(pairMap(group)))
-      val testID = for (group <- groupP; name <- nameP(group)) yield (group, name)
-      (token(Space) ~> matched(testID)).*
+      val groupP = token(id.examples(pairMap.keySet.toSet)) <~ token('/')
+
+      // A parser for page definitions
+      val pageP: Parser[ScriptedTestPage] = ("*" ~ NatBasic ~ "of" ~ NatBasic) map {
+        case _ ~ page ~ _ ~ total => ScriptedTestPage(page, total)
+      }
+      // Grabs the filenames from a given test group in the current page definition.
+      def pagedFilenames(group: String, page: ScriptedTestPage): Seq[String] = {
+        val files = pairMap(group).toSeq.sortBy(_.toLowerCase)
+        val pageSize = files.size / page.total
+        // The last page may loose some values, so we explicitly keep them
+        val dropped = files.drop(pageSize * (page.page - 1))
+        if (page.page == page.total) dropped
+        else dropped.take(pageSize)
+      }
+      def nameP(group: String) = {
+        token("*".id | id.examples(pairMap(group)))
+      }
+      val PagedIds: Parser[Seq[String]] =
+        for {
+          group <- groupP
+          page <- pageP
+          files = pagedFilenames(group, page)
+          // TODO -  Fail the parser if we don't have enough files for the given page size
+          //if !files.isEmpty
+        } yield files map (f => group + '/' + f)
+
+      val testID = (for (group <- groupP; name <- nameP(group)) yield (group, name))
+      val testIdAsGroup = matched(testID) map (test => Seq(test))
+      //(token(Space) ~> matched(testID)).*
+      (token(Space) ~> (PagedIds | testIdAsGroup)).* map (_.flatten)
     }
 
   def scriptedTask: Initialize[InputTask[Unit]] = Def.inputTask {
@@ -66,20 +98,29 @@ object ScriptedPlugin extends Plugin {
 
   val scriptedSettings = Seq(
     ivyConfigurations ++= Seq(scriptedConf, scriptedLaunchConf),
-    scriptedSbt := sbtVersion.value,
-    sbtLauncher <<= getJars(scriptedLaunchConf).map(_.get.head),
+    scriptedSbt := (sbtVersion in pluginCrossBuild).value,
+    sbtLauncher := getJars(scriptedLaunchConf).value.get.head,
     sbtTestDirectory := sourceDirectory.value / "sbt-test",
-    libraryDependencies ++= Seq(
-      "org.scala-sbt" % "scripted-sbt" % scriptedSbt.value % scriptedConf.toString,
-      "org.scala-sbt" % "sbt-launch" % scriptedSbt.value % scriptedLaunchConf.toString
-    ),
+    libraryDependencies ++= (partialVersion(scriptedSbt.value) match {
+      case Some((0, 13)) =>
+        Seq(
+          "org.scala-sbt" % "scripted-sbt" % scriptedSbt.value % scriptedConf.toString,
+          "org.scala-sbt" % "sbt-launch" % scriptedSbt.value % scriptedLaunchConf.toString
+        )
+      case Some((1, _)) =>
+        Seq(
+          "org.scala-sbt" %% "scripted-sbt" % scriptedSbt.value % scriptedConf.toString,
+          "org.scala-sbt" % "sbt-launch" % scriptedSbt.value % scriptedLaunchConf.toString
+        )
+    }),
     scriptedBufferLog := true,
     scriptedClasspath := getJars(scriptedConf).value,
-    scriptedTests <<= scriptedTestsTask,
-    scriptedRun <<= scriptedRunTask,
-    scriptedDependencies <<= (compile in Test, publishLocal) map { (analysis, pub) => Unit },
+    scriptedTests := scriptedTestsTask.value,
+    scriptedRun := scriptedRunTask.value,
+    scriptedDependencies := (()),
+    scriptedDependencies := (scriptedDependencies dependsOn (compile in Test, publishLocal)).value,
     scriptedLaunchOpts := Seq(),
-    scripted <<= scriptedTask
+    scripted := scriptedTask.evaluated
   )
   private[this] def getJars(config: Configuration): Initialize[Task[PathFinder]] = Def.task {
     PathFinder(Classpaths.managedJars(config, classpathTypes.value, update.value).map(_.data))
