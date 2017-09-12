@@ -192,7 +192,7 @@ private[sbt] object Load {
     } else
       config
 
-  def defaultDelegates: LoadedBuild => Scope => Seq[Scope] = (lb: LoadedBuild) => {
+  def defaultDelegates: LoadedBuild => sbt.Scope => Seq[sbt.Scope] = (lb: LoadedBuild) => {
     val rootProject = getRootProject(lb.units)
     def resolveRef(project: Reference): ResolvedReference =
       Scope.resolveReference(lb.root, rootProject, project)
