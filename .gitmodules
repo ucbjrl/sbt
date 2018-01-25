@@ -1,0 +1,3 @@
+[submodule "main/src/main/scala/xsbt"]
+	path = main/src/main/scala/xsbt
+	url = file:///Users/jrl/noArc/clients/ucb/git/xsbt.boot
