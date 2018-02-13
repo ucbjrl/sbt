@@ -117,8 +117,11 @@ object MainLoop {
                                                               exec.execId,
                                                               Vector())
     val parser = Command combine state.definedCommands
-    val newState = parse(exec.commandLine, parser(state)) match {
-      case Right(s) => s() // apply command.  command side effects happen here
+    val parseResult = parse(exec.commandLine, parser(state))
+    val newState = parseResult match {
+      case Right(s) =>
+        val cmd = s
+        s() // apply command.  command side effects happen here
       case Left(errMsg) =>
         state.log error errMsg
         state.fail

@@ -168,6 +168,7 @@ object Parser extends ParserMain {
 
   final class Failure private[sbt] (mkErrors: => Seq[String], val definitive: Boolean)
       extends Result[Nothing] {
+//    println("Failure: " + mkErrors)
     lazy val errors: Seq[String] = mkErrors
     def isFailure = true
     def isValid = false
@@ -416,11 +417,13 @@ trait ParserMain {
   }
 
   /** Parses input `str` using `parser`.  If successful, the result is provided wrapped in `Right`.  If unsuccessful, an error message is provided in `Left`.*/
-  def parse[T](str: String, parser: Parser[T]): Either[String, T] =
+  def parse[T](str: String, parser: Parser[T]): Either[String, T] = {
+//    println(s"parse: $str with $parser")
     Parser.result(parser, str).left.map { failures =>
       val (msgs, pos) = failures()
       ProcessError(str, msgs, pos)
     }
+  }
 
   /**
    * Convenience method to use when developing a parser.
