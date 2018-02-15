@@ -343,8 +343,9 @@ object Defaults extends BuildCommon {
 
   lazy val projectTasks: Seq[Setting[_]] = Seq(
     cleanFiles := Seq(managedDirectory.value, target.value),
-    cleanKeepFiles := historyPath.value.toList,
-    clean := doClean(cleanFiles.value, cleanKeepFiles.value),
+    cleanFilesTask := cleanFilesImpl.value,
+    cleanKeepFiles := historyPath.value.toVector,
+    clean := (Def.task { IO.delete(cleanFilesTask.value) } tag (Tags.Clean)).value,
     consoleProject := consoleProjectTask.value,
     watchTransitiveSources := watchTransitiveSourcesTask.value,
     watch := watchSetting.value
@@ -647,10 +648,15 @@ object Defaults extends BuildCommon {
   def detectTests: Initialize[Task[Seq[TestDefinition]]] = (loadedTestFrameworks, compile, streams) map { (frameworkMap, analysis, s) =>
     Tests.discover(frameworkMap.values.toList, analysis, s.log)._1
   }
-  def defaultRestrictions: Initialize[Seq[Tags.Rule]] = parallelExecution { par =>
-    val max = EvaluateTask.SystemProcessors
-    Tags.limitAll(if (par) max else 1) :: Tags.limit(Tags.ForkedTestGroup, 1) :: Nil
-  }
+  def defaultRestrictions: Initialize[Seq[Tags.Rule]] =
+    Def.setting {
+      val par = parallelExecution.value
+      val max = EvaluateTask.SystemProcessors
+      Tags.limitAll(if (par) max else 1) ::
+        Tags.limit(Tags.ForkedTestGroup, 1) ::
+        Tags.exclusiveGroup(Tags.Clean) ::
+        Nil
+    }
 
   lazy val packageBase: Seq[Setting[_]] = Seq(
     artifact := Artifact(moduleName.value)
@@ -775,15 +781,23 @@ object Defaults extends BuildCommon {
     pickMainClass(classes)
   }
 
-  def doClean(clean: Seq[File], preserve: Seq[File]): Unit =
-    IO.withTemporaryDirectory { temp =>
-      val (dirs, files) = preserve.filter(_.exists).flatMap(_.***.get).partition(_.isDirectory)
-      val mappings = files.zipWithIndex map { case (f, i) => (f, new File(temp, i.toHexString)) }
-      IO.move(mappings)
-      IO.delete(clean)
-      IO.createDirectories(dirs) // recreate empty directories
-      IO.move(mappings.map(_.swap))
+  /** Implements `cleanFilesTask` */
+  def cleanFilesImpl: Initialize[Task[Vector[File]]] =
+    Def.task {
+      val filesAndDirs = Vector(managedDirectory.value, target.value)
+      val preserve = cleanKeepFiles.value
+      val (dirs, fs) = filesAndDirs.filter(_.exists).partition(_.isDirectory)
+      val preserveSet = preserve.filter(_.exists).toSet
+      // performance reasons, only the direct items under `filesAndDirs` are allowed to be preserved.
+      val dirItems = dirs flatMap { _.*("*").get }
+      (preserveSet diff dirItems.toSet) match {
+        case xs if xs.isEmpty => ()
+        case xs               => sys.error(s"cleanKeepFiles contains directory/file that are not directly under cleanFiles: $xs")
+      }
+      val toClean = (dirItems filterNot { preserveSet(_) }) ++ fs
+      toClean
     }
+
   def runMainTask(classpath: Initialize[Task[Classpath]], scalaRun: Initialize[Task[ScalaRun]]): Initialize[InputTask[Unit]] =
     {
       import DefaultParsers._
@@ -1919,12 +1933,20 @@ object Classpaths {
 
   @deprecated("Specify the classpath that includes internal dependencies", "0.13.0")
   def autoPlugins(report: UpdateReport): Seq[String] = autoPlugins(report, Nil)
+
+  @deprecated("Specify the jarTypes", "0.13.17")
   def autoPlugins(report: UpdateReport, internalPluginClasspath: Seq[File]): Seq[String] =
-    {
-      val pluginClasspath = report.matching(configurationFilter(CompilerPlugin.name)) ++ internalPluginClasspath
-      val plugins = classpath.ClasspathUtilities.compilerPlugins(pluginClasspath)
-      plugins.map("-Xplugin:" + _.getAbsolutePath).toSeq
-    }
+    autoPlugins(report, internalPluginClasspath, Set("jar", "bundle"))
+
+  def autoPlugins(
+    report: UpdateReport,
+    internalPluginClasspath: Seq[File],
+    jarTypes: Set[String]): Seq[String] = {
+    val pluginClasspath = report.matching(configurationFilter(CompilerPlugin.name) &&
+      artifactFilter(`type` = jarTypes)) ++ internalPluginClasspath
+    val plugins = classpath.ClasspathUtilities.compilerPlugins(pluginClasspath)
+    plugins.map("-Xplugin:" + _.getAbsolutePath).toSeq
+  }
 
   private[this] lazy val internalCompilerPluginClasspath: Initialize[Task[Classpath]] =
     (thisProjectRef, settingsData, buildDependencies) flatMap { (ref, data, deps) =>
@@ -1934,7 +1956,7 @@ object Classpaths {
   lazy val compilerPluginConfig = Seq(
     scalacOptions := {
       val options = scalacOptions.value
-      val newPlugins = autoPlugins(update.value, internalCompilerPluginClasspath.value.files)
+      val newPlugins = autoPlugins(update.value, internalCompilerPluginClasspath.value.files, classpathTypes.value)
       val existing = options.toSet
       if (autoCompilerPlugins.value) options ++ newPlugins.filterNot(existing) else options
     }
@@ -2068,7 +2090,7 @@ trait BuildExtra extends BuildCommon with DefExtra {
    */
   def addSbtPlugin(dependency: ModuleID): Setting[Seq[ModuleID]] =
     libraryDependencies += {
-      val sbtV = (sbtBinaryVersion in update).value
+      val sbtV = (sbtBinaryVersion in pluginCrossBuild).value
       val scalaV = (scalaBinaryVersion in update).value
       sbtPluginExtra(dependency, sbtV, scalaV)
     }
